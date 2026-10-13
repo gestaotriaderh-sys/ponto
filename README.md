@@ -22,8 +22,9 @@ precisa de servidor de banco de dados.
   - ativar/desativar funcionário e trocar PIN;
   - histórico de jornadas: ao mudar a jornada, escolhe-se a data a partir
     da qual ela vale; os dias anteriores mantêm a jornada da época;
-  - relatório mensal de todos os funcionários com horas trabalhadas,
-    esperadas, horas extras, horas faltando, saldo e faltas (com CSV);
+  - relatório de horas por período (data inicial e final) para os
+    funcionários escolhidos ou todos, com horas trabalhadas, esperadas,
+    horas extras, horas faltando, saldo e faltas (com CSV);
   - espelho de ponto mensal com horas trabalhadas, esperadas e saldo por dia;
   - inclusão de marcação esquecida com justificativa;
   - exportação do espelho em CSV (abre no Excel).
@@ -52,6 +53,12 @@ O banco fica em `instance/ponto.sqlite3`. Faça backup desse arquivo.
 
 Para produção, use um servidor WSGI (ex.: `pip install waitress` e
 `waitress-serve --port 5000 app:app`) atrás de HTTPS.
+
+## Cores e logotipo
+
+Todas as cores ficam no início de `ponto/static/style.css`, no bloco
+"CORES DA EMPRESA". Para mostrar o logotipo no topo, salve a imagem como
+`ponto/static/logo.png` e reinicie o programa.
 
 ## Testes
 

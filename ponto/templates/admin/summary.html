@@ -1,13 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Relatório {{ month_label }}{% endblock %}
+{% block title %}Relatório de horas{% endblock %}
 {% block content %}
-<h1>Relatório de horas — {{ month_label }}</h1>
-<form method="get" class="toolbar">
-  <label>Mês <input type="month" name="mes" value="{{ month }}"></label>
-  <button type="submit">Ver</button>
-  <a href="{{ url_for('admin.summary_csv', mes=month) }}">Exportar CSV</a>
+<h1>Relatório de horas</h1>
+
+<form method="get" class="card report-filter" id="filtro">
+  <div class="grid">
+    <label>Data inicial <input type="date" name="inicio" value="{{ first.isoformat() }}" required></label>
+    <label>Data final <input type="date" name="fim" value="{{ last.isoformat() }}" required></label>
+  </div>
+
+  <fieldset class="people">
+    <legend>Funcionários</legend>
+    <label class="check all"><input type="checkbox" name="todos" value="1" id="todos"
+      {{ 'checked' if all_selected }}> Todos</label>
+    <div class="people-list">
+      {% for e in employees %}
+        <label class="check {{ '' if e.active else 'inactive' }}">
+          <input type="checkbox" name="func" value="{{ e.id }}" class="func"
+            {{ 'checked' if all_selected or e.id in selected }}>
+          {{ e.name }} <span class="hint">{{ e.code }}{{ '' if e.active else ' · inativo' }}</span>
+        </label>
+      {% else %}
+        <p class="hint">Nenhum funcionário cadastrado.</p>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <button type="submit">Gerar relatório</button>
 </form>
 
+{% if not error %}
+<div class="toolbar">
+  <h2>{{ first.strftime('%d/%m/%Y') }} a {{ last.strftime('%d/%m/%Y') }}</h2>
+  <a class="button secondary" href="{{ url_for('admin.summary_csv') }}?{{ query }}">Exportar CSV</a>
+</div>
 <div class="table-wrap">
 <table>
   <thead>
@@ -19,7 +45,7 @@
   <tbody>
   {% for emp, t in rows %}
     <tr class="{{ '' if emp.active else 'inactive' }}">
-      <td><a href="{{ url_for('admin.report', emp_id=emp.id, mes=month) }}">{{ emp.name }}</a>
+      <td><a href="{{ url_for('admin.report', emp_id=emp.id, mes=first.strftime('%Y-%m')) }}">{{ emp.name }}</a>
         <span class="hint">{{ emp.code }}</span></td>
       <td>{{ t.worked | hhmm }}</td>
       <td>{{ t.expected | hhmm }}</td>
@@ -35,6 +61,7 @@
   </tbody>
 </table>
 </div>
+{% endif %}
 <p class="hint">
   <strong>Horas extras</strong>: soma do tempo trabalhado além da jornada em cada dia.
   <strong>Horas faltando</strong>: soma do tempo que faltou para completar a jornada em cada dia.
@@ -43,4 +70,14 @@
   O dia de hoje já entra na conta, então durante o expediente ele aparece como horas faltando.
   Clique no nome para ver o espelho de ponto dia a dia.
 </p>
+
+<script>
+  // "Todos" marca/desmarca a lista; mexer na lista atualiza "Todos".
+  const todos = document.getElementById("todos");
+  const funcs = [...document.querySelectorAll("input.func")];
+  todos.addEventListener("change", () => funcs.forEach(f => f.checked = todos.checked));
+  funcs.forEach(f => f.addEventListener("change", () => {
+    todos.checked = funcs.every(x => x.checked);
+  }));
+</script>
 {% endblock %}

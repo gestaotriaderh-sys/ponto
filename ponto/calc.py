@@ -8,7 +8,7 @@ não é contado.
 
 import calendar
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 PUNCH_LABELS = ["Entrada", "Saída intervalo", "Retorno intervalo", "Saída"]
 WEEKDAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -61,10 +61,16 @@ def schedule_for(schedules, day):
 
 
 def month_summary(year, month, punches, schedules, holidays=None, today=None):
-    """Resumo diário do mês.
+    """Resumo diário de um mês inteiro (ver `period_summary`)."""
+    last = date(year, month, calendar.monthrange(year, month)[1])
+    return period_summary(date(year, month, 1), last, punches, schedules, holidays, today)
 
-    `punches` é uma lista de datetime do funcionário no mês. `schedules` é
-    o histórico de jornadas (ver `schedule_for`); cada jornada tem os
+
+def period_summary(first, last, punches, schedules, holidays=None, today=None):
+    """Resumo diário de `first` até `last` (inclusive).
+
+    `punches` é uma lista de datetime do funcionário no período. `schedules`
+    é o histórico de jornadas (ver `schedule_for`); cada jornada tem os
     minutos esperados de segunda (índice 0) a domingo (índice 6).
     `holidays` mapeia date -> nome do feriado; feriados não têm jornada
     esperada. Dias futuros não contam como falta.
@@ -76,8 +82,8 @@ def month_summary(year, month, punches, schedules, holidays=None, today=None):
         by_day.setdefault(p.date(), []).append(p)
 
     days = []
-    for d in range(1, calendar.monthrange(year, month)[1] + 1):
-        day = date(year, month, d)
+    day = first
+    while day <= last:
         day_punches = sorted(by_day.get(day, []))
         minutes, incomplete = worked_minutes(day_punches)
         holiday = holidays.get(day)
@@ -90,6 +96,7 @@ def month_summary(year, month, punches, schedules, holidays=None, today=None):
                 day_off=bool(holiday or not scheduled),
             )
         )
+        day += timedelta(days=1)
     return days
 
 

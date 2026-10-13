@@ -39,4 +39,8 @@ def create_app(test_config=None):
     from .calc import fmt_minutes
 
     app.jinja_env.filters["hhmm"] = fmt_minutes
+
+    # Logotipo opcional: basta colocar ponto/static/logo.png.
+    has_logo = os.path.exists(os.path.join(app.static_folder, "logo.png"))
+    app.jinja_env.globals["has_logo"] = has_logo
     return app

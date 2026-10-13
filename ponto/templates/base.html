@@ -8,7 +8,10 @@
 </head>
 <body>
   <header>
-    <a class="brand" href="{{ url_for('kiosk.index') }}">Ponto</a>
+    <a class="brand" href="{{ url_for('kiosk.index') }}">
+      {% if has_logo %}<img src="{{ url_for('static', filename='logo.png') }}" alt="">{% endif %}
+      Ponto
+    </a>
     <nav>
       {% if session.admin %}
         <a href="{{ url_for('admin.employees') }}">Funcionários</a>

@@ -179,16 +179,41 @@ def test_future_schedule_change_can_be_cancelled(admin, clock):
     assert "ainda não começaram" in r.get_data(as_text=True)
 
 
-def test_monthly_summary(admin, clock):
+def test_summary_report(admin, clock):
     clock.value = datetime(2026, 10, 1, 7, 0)
     add_employee(admin, code="001")
-    for ts in ["08:00", "18:00"]:  # 10h na quinta 01/10 -> 2h extras
+    admin.post("/admin/", data={"code": "002", "name": "João Souza", "pin": "1234",
+                                **{f"dia_{i}": h for i, h in enumerate(WEEKDAYS_8H)}})
+    for ts in ["08:00", "18:00"]:  # Maria: 10h na quinta 01/10 -> 2h extras
         h, m = map(int, ts.split(":"))
         clock.value = datetime(2026, 10, 1, h, m)
         punch(admin, code="001")
     clock.value = datetime(2026, 10, 2, 23, 0)  # sexta 02/10 sem marcação -> falta
 
-    body = admin.get("/admin/relatorio?mes=2026-10").get_data(as_text=True)
-    assert "Relatório de horas — 10/2026" in body and "Maria Silva" in body
-    csv = admin.get("/admin/relatorio.csv?mes=2026-10").get_data(as_text=True)
+    # Sem parâmetros: do dia 1º até hoje, todos os funcionários.
+    body = admin.get("/admin/relatorio").get_data(as_text=True)
+    assert "01/10/2026 a 02/10/2026" in body
+    assert "Maria Silva" in body and "João Souza" in body
+
+    # Período de um dia só, todos.
+    csv = admin.get("/admin/relatorio.csv?inicio=2026-10-01&fim=2026-10-01&todos=1")
+    csv = csv.get_data(as_text=True)
+    assert "Período: 01/10/2026 a 01/10/2026" in csv
+    assert "001;Maria Silva;10:00;08:00;02:00;00:00;02:00;0;0" in csv
+    assert "002;João Souza;00:00;08:00;00:00;08:00;-08:00;1;0" in csv
+
+    # Só a Maria, dois dias.
+    csv = admin.get("/admin/relatorio.csv?inicio=2026-10-01&fim=2026-10-02&func=1")
+    csv = csv.get_data(as_text=True)
     assert "001;Maria Silva;10:00;16:00;02:00;08:00;-06:00;1;0" in csv
+    assert "João" not in csv
+
+
+def test_summary_report_validation(admin, clock):
+    add_employee(admin)
+    body = admin.get("/admin/relatorio?inicio=2026-10-10&fim=2026-10-01&todos=1")
+    assert "não pode ser anterior" in body.get_data(as_text=True)
+    body = admin.get("/admin/relatorio?inicio=2026-10-01&fim=2026-10-10")
+    assert "Selecione pelo menos um funcionário" in body.get_data(as_text=True)
+    body = admin.get("/admin/relatorio?inicio=2024-01-01&fim=2026-10-10&todos=1")
+    assert "período máximo" in body.get_data(as_text=True)

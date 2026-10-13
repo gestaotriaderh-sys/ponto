@@ -4,7 +4,8 @@ import csv
 import functools
 import hmac
 import io
-from datetime import date, datetime
+import calendar
+from datetime import date, datetime, timedelta
 
 from flask import (
     Blueprint,
@@ -23,8 +24,8 @@ from ..calc import (
     WEEKDAYS,
     describe_schedule,
     fmt_minutes,
-    month_summary,
     month_totals,
+    period_summary,
     parse_hours,
     parse_schedule,
     parse_ts,
@@ -267,8 +268,13 @@ def _month_param():
 
 
 def _load_month(emp, year, month):
-    start = f"{year:04d}-{month:02d}-01"
-    end = f"{year + (month == 12):04d}-{month % 12 + 1:02d}-01"
+    last = date(year, month, calendar.monthrange(year, month)[1])
+    return _load_period(emp, date(year, month, 1), last)
+
+
+def _load_period(emp, first, last):
+    """Marcações e resumo diário do funcionário de `first` a `last`."""
+    start, end = first.isoformat(), (last + timedelta(days=1)).isoformat()
     rows = get_db().execute(
         "SELECT * FROM punches WHERE employee_id = ? AND ts >= ? AND ts < ? ORDER BY ts",
         (emp["id"], start, end),
@@ -279,9 +285,9 @@ def _load_month(emp, year, month):
             "SELECT * FROM holidays WHERE day >= ? AND day < ?", (start, end)
         )
     }
-    days = month_summary(
-        year,
-        month,
+    days = period_summary(
+        first,
+        last,
         [parse_ts(r["ts"]) for r in rows],
         _schedules(emp["id"]),
         holidays,
@@ -444,44 +450,95 @@ def delete_holiday(day):
     return redirect(url_for("admin.holidays", ano=day[:4]))
 
 
-def _summary_rows(year, month):
-    """Totais do mês de cada funcionário ativo ou com marcações no mês."""
-    start = f"{year:04d}-{month:02d}-01"
-    end = f"{year + (month == 12):04d}-{month % 12 + 1:02d}-01"
-    emps = get_db().execute(
-        "SELECT * FROM employees WHERE active = 1 OR id IN"
-        " (SELECT employee_id FROM punches WHERE ts >= ? AND ts < ?) ORDER BY name",
-        (start, end),
-    ).fetchall()
-    return [(emp, month_totals(_load_month(emp, year, month)[1])) for emp in emps]
+MAX_REPORT_DAYS = 366
+
+
+def _summary_params():
+    """Lê período e funcionários do relatório a partir da URL.
+
+    Retorna (início, fim, todos?, ids selecionados, mensagem de erro).
+    Sem parâmetros, o padrão é do dia 1º do mês atual até hoje, com todos
+    os funcionários.
+    """
+    today = now().date()
+    try:
+        first = date.fromisoformat(request.args.get("inicio") or today.replace(day=1).isoformat())
+        last = date.fromisoformat(request.args.get("fim") or today.isoformat())
+    except ValueError:
+        return today.replace(day=1), today, True, set(), "Data inválida."
+    first_load = not request.args
+    all_selected = first_load or request.args.get("todos") == "1"
+    ids = {int(x) for x in request.args.getlist("func") if x.isdigit()}
+    error = None
+    if last < first:
+        error = "A data final não pode ser anterior à data inicial."
+    elif (last - first).days >= MAX_REPORT_DAYS:
+        error = f"O período máximo do relatório é de {MAX_REPORT_DAYS} dias."
+    elif not all_selected and not ids:
+        error = "Selecione pelo menos um funcionário ou marque “Todos”."
+    return first, last, all_selected, ids, error
+
+
+def _summary_rows(first, last, all_selected, ids):
+    """Totais do período de cada funcionário escolhido.
+
+    Com `all_selected`, inclui os ativos e os inativos com marcações no período.
+    """
+    db = get_db()
+    if all_selected:
+        emps = db.execute(
+            "SELECT * FROM employees WHERE active = 1 OR id IN"
+            " (SELECT employee_id FROM punches WHERE ts >= ? AND ts < ?) ORDER BY name",
+            (first.isoformat(), (last + timedelta(days=1)).isoformat()),
+        ).fetchall()
+    else:
+        marks = ",".join("?" * len(ids))
+        emps = db.execute(
+            f"SELECT * FROM employees WHERE id IN ({marks}) ORDER BY name", tuple(ids)
+        ).fetchall()
+    return [(emp, month_totals(_load_period(emp, first, last)[1])) for emp in emps]
 
 
 @bp.get("/relatorio")
 @login_required
 def summary():
-    year, month = _month_param()
-    rows = _summary_rows(year, month)
+    first, last, all_selected, ids, error = _summary_params()
+    if error:
+        flash(error, "error")
+    rows = [] if error else _summary_rows(first, last, all_selected, ids)
+    employees = get_db().execute(
+        "SELECT id, code, name, active FROM employees ORDER BY active DESC, name"
+    ).fetchall()
     return render_template(
         "admin/summary.html",
         rows=rows,
-        month=f"{year:04d}-{month:02d}",
-        month_label=f"{month:02d}/{year:04d}",
+        error=error,
+        first=first,
+        last=last,
+        all_selected=all_selected,
+        selected=ids,
+        employees=employees,
+        query=request.query_string.decode(),
     )
 
 
 @bp.get("/relatorio.csv")
 @login_required
 def summary_csv():
-    year, month = _month_param()
+    first, last, all_selected, ids, error = _summary_params()
+    if error:
+        flash(error, "error")
+        return redirect(url_for("admin.summary", **request.args.to_dict(flat=False)))
     out = io.StringIO()
     w = csv.writer(out, delimiter=";")
+    w.writerow([f"Período: {first:%d/%m/%Y} a {last:%d/%m/%Y}"])
     w.writerow(
         [
             "Matrícula", "Nome", "Trabalhado", "Esperado", "Horas extras",
             "Horas faltando", "Saldo", "Faltas (dias)", "Dias com marcação faltando",
         ]
     )
-    for emp, t in _summary_rows(year, month):
+    for emp, t in _summary_rows(first, last, all_selected, ids):
         w.writerow(
             [
                 emp["code"], emp["name"], fmt_minutes(t.worked), fmt_minutes(t.expected),
@@ -489,10 +546,9 @@ def summary_csv():
                 t.absences, t.incomplete,
             ]
         )
+    filename = f"relatorio_{first.isoformat()}_a_{last.isoformat()}.csv"
     return Response(
         "\ufeff" + out.getvalue(),
         mimetype="text/csv",
-        headers={
-            "Content-Disposition": f'attachment; filename="relatorio_{year:04d}-{month:02d}.csv"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
