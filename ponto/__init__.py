@@ -1,0 +1,39 @@
+import os
+
+from flask import Flask
+
+from . import db
+
+
+def create_app(test_config=None):
+    app = Flask(__name__, instance_relative_config=True)
+    app.config.from_mapping(
+        SECRET_KEY=os.environ.get("PONTO_SECRET_KEY", "dev-troque-esta-chave"),
+        ADMIN_PASSWORD=os.environ.get("PONTO_ADMIN_PASSWORD", "admin"),
+        DATABASE=os.path.join(app.instance_path, "ponto.sqlite3"),
+        # Lax impede que outros sites enviem formulários com a sessão do admin.
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_HTTPONLY=True,
+        TIMEZONE=os.environ.get("PONTO_TIMEZONE", "America/Sao_Paulo"),
+        # Intervalo mínimo entre duas marcações do mesmo funcionário,
+        # para evitar registros duplicados por clique duplo.
+        MIN_PUNCH_INTERVAL_SECONDS=60,
+    )
+    if test_config:
+        app.config.update(test_config)
+
+    os.makedirs(app.instance_path, exist_ok=True)
+
+    app.teardown_appcontext(db.close_db)
+    with app.app_context():
+        db.init_db()
+
+    from .views import admin, kiosk
+
+    app.register_blueprint(kiosk.bp)
+    app.register_blueprint(admin.bp)
+
+    from .calc import fmt_minutes
+
+    app.jinja_env.filters["hhmm"] = fmt_minutes
+    return app

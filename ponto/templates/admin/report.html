@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Espelho — {{ emp.name }}{% endblock %}
+{% block content %}
+<h1>Espelho de ponto — {{ emp.name }} ({{ emp.code }})</h1>
+<form method="get" class="toolbar">
+  <label>Mês <input type="month" name="mes" value="{{ month }}"></label>
+  <button type="submit">Ver</button>
+  <a href="{{ url_for('admin.report_csv', emp_id=emp.id, mes=month) }}">Exportar CSV</a>
+</form>
+
+<table>
+  <thead><tr><th>Data</th><th>Marcações</th><th>Trabalhado</th><th>Esperado</th><th>Saldo</th></tr></thead>
+  <tbody>
+  {% for d in days %}
+    <tr class="{{ 'weekend' if d.day.weekday() >= 5 }} {{ 'incomplete' if d.incomplete }}">
+      <td>{{ d.day.strftime('%d/%m') }} {{ ['seg','ter','qua','qui','sex','sáb','dom'][d.day.weekday()] }}</td>
+      <td>
+        {% for p in d.punches %}
+          {% set note = manual.get(p.isoformat()) %}
+          <span {% if note %}class="manual" title="Ajuste: {{ note }}"{% endif %}>{{ p.strftime('%H:%M') }}{% if note %}*{% endif %}</span>
+        {% endfor %}
+        {% if d.incomplete %}<em>(marcação faltando)</em>{% endif %}
+      </td>
+      <td>{{ d.worked_minutes | hhmm }}</td>
+      <td>{{ d.expected_minutes | hhmm }}</td>
+      <td class="{{ 'neg' if d.balance_minutes < 0 else 'pos' if d.balance_minutes > 0 }}">{{ d.balance_minutes | hhmm }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr><th colspan="2">Total</th><th>{{ total_worked | hhmm }}</th><th>{{ total_expected | hhmm }}</th>
+      <th>{{ (total_worked - total_expected) | hhmm }}</th></tr>
+  </tfoot>
+</table>
+<p class="hint">* marcação incluída manualmente pelo administrador (passe o mouse para ver a justificativa).</p>
+
+<section class="card">
+  <h2>Incluir marcação esquecida</h2>
+  <form method="post" action="{{ url_for('admin.manual_punch', emp_id=emp.id) }}" class="grid">
+    <label>Data e hora <input type="datetime-local" name="ts" required></label>
+    <label>Justificativa <input name="note" required placeholder="ex.: esqueceu de marcar a saída"></label>
+    <button type="submit">Incluir</button>
+  </form>
+</section>
+{% endblock %}

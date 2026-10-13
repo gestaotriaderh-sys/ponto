@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card kiosk">
+  <p class="clock" id="clock">{{ now.strftime('%H:%M:%S') }}</p>
+  <p class="date">{{ now.strftime('%d/%m/%Y') }}</p>
+  <form method="post" action="{{ url_for('kiosk.punch') }}">
+    <label>Matrícula
+      <input name="code" required autofocus autocomplete="off">
+    </label>
+    <label>PIN
+      <input name="pin" type="password" inputmode="numeric" required autocomplete="off">
+    </label>
+    <button type="submit">Registrar ponto</button>
+  </form>
+</section>
+<script>
+  // Relógio visual; o horário registrado é sempre o do servidor.
+  const start = new Date("{{ now.isoformat() }}").getTime(), t0 = Date.now();
+  setInterval(() => {
+    const d = new Date(start + Date.now() - t0);
+    document.getElementById("clock").textContent = d.toTimeString().slice(0, 8);
+  }, 1000);
+</script>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Comprovante{% endblock %}
+{% block content %}
+<section class="card receipt">
+  <h1>Ponto registrado</h1>
+  <p class="big">{{ label }} — {{ ts.strftime('%H:%M:%S') }}</p>
+  <dl>
+    <dt>Funcionário</dt><dd>{{ emp.name }} ({{ emp.code }})</dd>
+    <dt>Data</dt><dd>{{ ts.strftime('%d/%m/%Y') }}</dd>
+    <dt>Comprovante nº</dt><dd>{{ '%06d' % punch_id }}</dd>
+    <dt>Marcações de hoje</dt>
+    <dd>{% for p in today %}{{ p.strftime('%H:%M') }}{% if not loop.last %} · {% endif %}{% endfor %}</dd>
+  </dl>
+  <a class="button" href="{{ url_for('kiosk.index') }}">Concluir</a>
+</section>
+<script>setTimeout(() => location.href = "{{ url_for('kiosk.index') }}", 10000);</script>
+{% endblock %}
