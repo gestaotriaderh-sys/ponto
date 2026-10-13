@@ -2,6 +2,8 @@
 {% block title %}Espelho — {{ emp.name }}{% endblock %}
 {% block content %}
 <h1>Espelho de ponto — {{ emp.name }} ({{ emp.code }})</h1>
+<p class="hint">Jornada: {{ schedule_text }} ·
+  <a href="{{ url_for('admin.edit_employee', emp_id=emp.id) }}">editar</a></p>
 <form method="get" class="toolbar">
   <label>Mês <input type="month" name="mes" value="{{ month }}"></label>
   <button type="submit">Ver</button>
@@ -12,13 +14,14 @@
   <thead><tr><th>Data</th><th>Marcações</th><th>Trabalhado</th><th>Esperado</th><th>Saldo</th></tr></thead>
   <tbody>
   {% for d in days %}
-    <tr class="{{ 'weekend' if d.day.weekday() >= 5 }} {{ 'incomplete' if d.incomplete }}">
+    <tr class="{{ 'off' if d.holiday or not schedule[d.day.weekday()] }} {{ 'incomplete' if d.incomplete }}">
       <td>{{ d.day.strftime('%d/%m') }} {{ ['seg','ter','qua','qui','sex','sáb','dom'][d.day.weekday()] }}</td>
       <td>
         {% for p in d.punches %}
           {% set note = manual.get(p.isoformat()) %}
           <span {% if note %}class="manual" title="Ajuste: {{ note }}"{% endif %}>{{ p.strftime('%H:%M') }}{% if note %}*{% endif %}</span>
         {% endfor %}
+        {% if d.holiday %}<span class="tag">Feriado: {{ d.holiday }}</span>{% endif %}
         {% if d.incomplete %}<em>(marcação faltando)</em>{% endif %}
       </td>
       <td>{{ d.worked_minutes | hhmm }}</td>

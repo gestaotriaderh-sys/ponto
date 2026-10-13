@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Feriados{% endblock %}
+{% block content %}
+<h1>Feriados de {{ year }}</h1>
+<form method="get" class="toolbar">
+  <a href="{{ url_for('admin.holidays', ano=year - 1) }}">← {{ year - 1 }}</a>
+  <a href="{{ url_for('admin.holidays', ano=year + 1) }}">{{ year + 1 }} →</a>
+</form>
+
+<table>
+  <thead><tr><th>Data</th><th>Dia</th><th>Feriado</th><th></th></tr></thead>
+  <tbody>
+  {% for day, name in holidays %}
+    <tr>
+      <td>{{ day.strftime('%d/%m/%Y') }}</td>
+      <td>{{ ['segunda','terça','quarta','quinta','sexta','sábado','domingo'][day.weekday()] }}</td>
+      <td>{{ name }}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin.delete_holiday', day=day.isoformat()) }}" class="inline"
+              onsubmit="return confirm('Remover o feriado {{ name }}?')">
+          <button class="link">Remover</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">Nenhum feriado cadastrado em {{ year }}.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="hint">Em dia de feriado ninguém tem jornada esperada. Se alguém trabalhar, as horas entram como saldo positivo.</p>
+
+<section class="card">
+  <h2>Incluir feriados nacionais de {{ year }}</h2>
+  <form method="post" action="{{ url_for('admin.import_holidays') }}">
+    <input type="hidden" name="year" value="{{ year }}">
+    <label class="check"><input type="checkbox" name="optional" value="1">
+      Incluir também Carnaval (segunda e terça) e Corpus Christi (pontos facultativos)</label>
+    <button type="submit">Incluir feriados nacionais</button>
+  </form>
+  <p class="hint">Feriados estaduais e municipais (ex.: aniversário da cidade) devem ser incluídos abaixo.</p>
+</section>
+
+<section class="card">
+  <h2>Incluir feriado</h2>
+  <form method="post" class="grid">
+    <label>Data <input type="date" name="day" required></label>
+    <label>Nome <input name="name" required placeholder="ex.: Aniversário da cidade"></label>
+    <button type="submit">Incluir</button>
+  </form>
+</section>
+{% endblock %}

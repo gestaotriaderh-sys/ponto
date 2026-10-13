@@ -3,16 +3,17 @@
 {% block content %}
 <h1>Funcionários</h1>
 <table>
-  <thead><tr><th>Matrícula</th><th>Nome</th><th>Jornada</th><th>Situação</th><th></th></tr></thead>
+  <thead><tr><th>Matrícula</th><th>Nome</th><th>Jornada semanal</th><th>Situação</th><th></th></tr></thead>
   <tbody>
   {% for e in employees %}
     <tr class="{{ '' if e.active else 'inactive' }}">
       <td>{{ e.code }}</td>
       <td>{{ e.name }}</td>
-      <td>{{ e.daily_minutes | hhmm }}</td>
+      <td>{{ e.schedule_text }}</td>
       <td>{{ 'Ativo' if e.active else 'Inativo' }}</td>
       <td class="actions">
         <a href="{{ url_for('admin.report', emp_id=e.id) }}">Espelho de ponto</a>
+        <a href="{{ url_for('admin.edit_employee', emp_id=e.id) }}">Editar jornada</a>
         <form method="post" action="{{ url_for('admin.toggle_active', emp_id=e.id) }}" class="inline">
           <button class="link">{{ 'Desativar' if e.active else 'Reativar' }}</button>
         </form>
@@ -34,7 +35,7 @@
     <label>Matrícula <input name="code" required></label>
     <label>Nome <input name="name" required></label>
     <label>PIN (4 a 8 dígitos) <input name="pin" inputmode="numeric" required></label>
-    <label>Jornada diária (horas) <input name="daily_hours" value="8" required></label>
+    {% include "admin/_schedule.html" %}
     <button type="submit">Cadastrar</button>
   </form>
 </section>

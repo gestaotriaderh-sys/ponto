@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Editar — {{ emp.name }}{% endblock %}
+{% block content %}
+<h1>Editar funcionário</h1>
+<section class="card">
+  <p class="hint">Matrícula {{ emp.code }}</p>
+  <form method="post" class="grid">
+    <label>Nome <input name="name" value="{{ emp.name }}" required></label>
+    {% include "admin/_schedule.html" %}
+    <button type="submit">Salvar</button>
+  </form>
+</section>
+<p class="hint">A nova jornada vale para todo o espelho de ponto, inclusive meses anteriores.</p>
+{% endblock %}

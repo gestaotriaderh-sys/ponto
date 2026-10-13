@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS employees (
     code TEXT NOT NULL UNIQUE,          -- matrícula
     name TEXT NOT NULL,
     pin_hash TEXT NOT NULL,
-    daily_minutes INTEGER NOT NULL DEFAULT 480,  -- jornada diária esperada
+    daily_minutes INTEGER NOT NULL DEFAULT 480,  -- obsoleto, substituído por schedule
+    -- Minutos esperados de segunda a domingo, separados por vírgula.
+    schedule TEXT NOT NULL DEFAULT '480,480,480,480,480,0,0',
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -24,6 +26,11 @@ CREATE TABLE IF NOT EXISTS punches (
     note TEXT,
     ip TEXT,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS holidays (
+    day TEXT PRIMARY KEY,               -- AAAA-MM-DD
+    name TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_punches_emp_ts ON punches(employee_id, ts);
@@ -57,4 +64,23 @@ def close_db(_exc=None):
 
 
 def init_db():
-    get_db().executescript(SCHEMA)
+    db = get_db()
+    _migrate(db)
+    db.executescript(SCHEMA)
+
+
+def _migrate(db):
+    """Atualiza bancos criados por versões anteriores."""
+    cols = [r["name"] for r in db.execute("PRAGMA table_info(employees)")]
+    if cols and "schedule" not in cols:
+        db.execute(
+            "ALTER TABLE employees ADD COLUMN schedule TEXT NOT NULL"
+            " DEFAULT '480,480,480,480,480,0,0'"
+        )
+        # Mantém a jornada diária antiga de segunda a sexta.
+        db.execute(
+            "UPDATE employees SET schedule ="
+            " daily_minutes || ',' || daily_minutes || ',' || daily_minutes || ','"
+            " || daily_minutes || ',' || daily_minutes || ',0,0'"
+        )
+        db.commit()

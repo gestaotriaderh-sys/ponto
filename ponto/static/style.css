@@ -33,7 +33,6 @@ table { width: 100%; border-collapse: collapse; background: var(--card); font-si
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
 td.actions { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
 tr.inactive td { color: var(--muted); }
-tr.weekend td { background: #fafafa; color: var(--muted); }
 tr.incomplete td { background: #fff8c5; }
 .neg { color: var(--err); } .pos { color: var(--ok); }
 .manual { text-decoration: underline dotted; cursor: help; }
@@ -42,3 +41,11 @@ tr.incomplete td { background: #fff8c5; }
 .receipt dd { margin: 0; }
 .hint { color: var(--muted); font-size: .85rem; }
 @media (max-width: 640px) { table { font-size: .85rem; } th, td { padding: 6px; } }
+tr.off td { background: #fafafa; color: var(--muted); }
+.tag { display: inline-block; background: #ddf4ff; color: #0550ae; border-radius: 4px; padding: 0 6px; font-size: .85rem; }
+fieldset.schedule { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+                    display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+fieldset.schedule legend { padding: 0 6px; font-size: .9rem; }
+fieldset.schedule .hint { font-size: .8rem; }
+label.check { display: flex; gap: 8px; align-items: center; color: var(--fg); }
+label.check input { width: auto; margin: 0; }

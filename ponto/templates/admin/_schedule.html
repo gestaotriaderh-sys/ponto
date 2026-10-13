@@ -1,0 +1,7 @@
+{# Campos de jornada por dia da semana. Espera `schedule_rows`. #}
+<fieldset class="schedule">
+  <legend>Horas de trabalho em cada dia <span class="hint">(deixe vazio nos dias de folga; aceita 8, 8,5 ou 8:30)</span></legend>
+  {% for label, field, value in schedule_rows %}
+    <label>{{ label }} <input name="{{ field }}" value="{{ value }}" placeholder="folga" inputmode="decimal"></label>
+  {% endfor %}
+</fieldset>

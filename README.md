@@ -15,7 +15,10 @@ precisa de servidor de banco de dados.
   (triggers no SQLite). Correções entram como novas marcações manuais, com
   justificativa obrigatória, e aparecem destacadas no espelho.
 - **Administração** (protegida por senha):
-  - cadastro de funcionários (matrícula, nome, PIN, jornada diária);
+  - cadastro de funcionários (matrícula, nome, PIN e horas de trabalho em
+    cada dia da semana, de segunda a domingo);
+  - cadastro de feriados, com inclusão automática dos feriados nacionais
+    (e, opcionalmente, Carnaval e Corpus Christi);
   - ativar/desativar funcionário e trocar PIN;
   - espelho de ponto mensal com horas trabalhadas, esperadas e saldo por dia;
   - inclusão de marcação esquecida com justificativa;
@@ -57,8 +60,11 @@ pytest
 
 - As marcações do dia são pareadas em ordem: (entrada, saída), (entrada, saída)...
 - Número ímpar de marcações → dia sinalizado como "marcação faltando".
-- A jornada esperada vale de segunda a sexta, até o dia de hoje; sábados,
-  domingos e dias futuros não contam. Feriados ainda não são considerados.
+- A jornada esperada de cada dia vem da escala semanal do funcionário
+  (dias sem horas são folga). Dias futuros não contam.
+- Em feriados a jornada esperada é zero; horas trabalhadas no feriado
+  entram como saldo positivo.
+- Alterar a escala de um funcionário recalcula também os meses anteriores.
 
 ## Aviso legal
 
@@ -71,7 +77,8 @@ trabalhista antes de usá-lo como controle oficial.
 
 ## Próximos passos sugeridos
 
-- Cadastro de feriados e escalas diferentes por funcionário (ex.: 6x1, 12x36).
+- Escalas que não se repetem toda semana (ex.: 12x36) e histórico de
+  alterações de jornada.
 - Banco de horas acumulado e cálculo de horas extras / adicional noturno.
 - Relatório em PDF com assinatura do funcionário.
 - Vários usuários administradores com log de auditoria.

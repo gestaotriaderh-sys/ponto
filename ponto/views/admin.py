@@ -4,7 +4,7 @@ import csv
 import functools
 import hmac
 import io
-from datetime import datetime
+from datetime import date, datetime
 
 from flask import (
     Blueprint,
@@ -19,9 +19,18 @@ from flask import (
 )
 from werkzeug.security import generate_password_hash
 
-from ..calc import fmt_minutes, month_summary, parse_ts
+from ..calc import (
+    WEEKDAYS,
+    describe_schedule,
+    fmt_minutes,
+    month_summary,
+    parse_hours,
+    parse_schedule,
+    parse_ts,
+)
 from ..clock import now
 from ..db import get_db
+from ..holidays import national_holidays
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -61,6 +70,26 @@ def _valid_pin(pin):
     return pin.isdigit() and 4 <= len(pin) <= 8
 
 
+def _schedule_from_form():
+    """Lê os campos dia_0..dia_6 (horas). Retorna lista de minutos ou None."""
+    try:
+        return [parse_hours(request.form.get(f"dia_{i}")) for i in range(7)]
+    except ValueError:
+        flash("Horas inválidas na jornada. Use, por exemplo, 8, 8,5 ou 8:30.", "error")
+        return None
+
+
+def _schedule_rows(schedule):
+    """Linhas (nome do dia, campo, valor) para o formulário de jornada."""
+    return [
+        (WEEKDAYS[i], f"dia_{i}", fmt_minutes(m) if m else "")
+        for i, m in enumerate(schedule)
+    ]
+
+
+DEFAULT_SCHEDULE = [480, 480, 480, 480, 480, 0, 0]
+
+
 @bp.route("/", methods=["GET", "POST"])
 @login_required
 def employees():
@@ -69,31 +98,68 @@ def employees():
         code = request.form.get("code", "").strip()
         name = request.form.get("name", "").strip()
         pin = request.form.get("pin", "")
-        hours = request.form.get("daily_hours", "8").replace(",", ".")
-        try:
-            daily_minutes = round(float(hours) * 60)
-        except ValueError:
-            daily_minutes = -1
-        if not code or not name:
+        schedule = _schedule_from_form()
+        if schedule is None:
+            pass
+        elif not code or not name:
             flash("Informe matrícula e nome.", "error")
         elif not _valid_pin(pin):
             flash("O PIN deve ter de 4 a 8 dígitos.", "error")
-        elif not 0 <= daily_minutes <= 24 * 60:
-            flash("Jornada diária inválida.", "error")
         elif db.execute("SELECT 1 FROM employees WHERE code = ?", (code,)).fetchone():
             flash(f"Já existe um funcionário com a matrícula {code}.", "error")
         else:
             db.execute(
-                "INSERT INTO employees (code, name, pin_hash, daily_minutes, created_at)"
+                "INSERT INTO employees (code, name, pin_hash, schedule, created_at)"
                 " VALUES (?, ?, ?, ?, ?)",
-                (code, name, generate_password_hash(pin), daily_minutes, now().isoformat()),
+                (
+                    code,
+                    name,
+                    generate_password_hash(pin),
+                    ",".join(map(str, schedule)),
+                    now().isoformat(),
+                ),
             )
             db.commit()
             flash(f"Funcionário {name} cadastrado.", "ok")
         return redirect(url_for("admin.employees"))
 
     rows = db.execute("SELECT * FROM employees ORDER BY active DESC, name").fetchall()
-    return render_template("admin/employees.html", employees=rows)
+    employees = [
+        dict(e, schedule_text=describe_schedule(parse_schedule(e["schedule"]))) for e in rows
+    ]
+    return render_template(
+        "admin/employees.html",
+        employees=employees,
+        schedule_rows=_schedule_rows(DEFAULT_SCHEDULE),
+    )
+
+
+@bp.route("/funcionario/<int:emp_id>/editar", methods=["GET", "POST"])
+@login_required
+def edit_employee(emp_id):
+    emp = _get_employee(emp_id)
+    if emp is None:
+        return redirect(url_for("admin.employees"))
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        schedule = _schedule_from_form()
+        if not name:
+            flash("Informe o nome.", "error")
+        elif schedule is not None:
+            db = get_db()
+            db.execute(
+                "UPDATE employees SET name = ?, schedule = ? WHERE id = ?",
+                (name, ",".join(map(str, schedule)), emp_id),
+            )
+            db.commit()
+            flash(f"Cadastro de {name} atualizado.", "ok")
+            return redirect(url_for("admin.employees"))
+        return redirect(url_for("admin.edit_employee", emp_id=emp_id))
+    return render_template(
+        "admin/edit_employee.html",
+        emp=emp,
+        schedule_rows=_schedule_rows(parse_schedule(emp["schedule"])),
+    )
 
 
 @bp.post("/funcionario/<int:emp_id>/ativo")
@@ -138,8 +204,19 @@ def _load_month(emp, year, month):
         "SELECT * FROM punches WHERE employee_id = ? AND ts >= ? AND ts < ? ORDER BY ts",
         (emp["id"], start, end),
     ).fetchall()
+    holidays = {
+        date.fromisoformat(h["day"]): h["name"]
+        for h in get_db().execute(
+            "SELECT * FROM holidays WHERE day >= ? AND day < ?", (start, end)
+        )
+    }
     days = month_summary(
-        year, month, [parse_ts(r["ts"]) for r in rows], emp["daily_minutes"], now().date()
+        year,
+        month,
+        [parse_ts(r["ts"]) for r in rows],
+        parse_schedule(emp["schedule"]),
+        holidays,
+        now().date(),
     )
     return rows, days
 
@@ -162,6 +239,8 @@ def report(emp_id):
         emp=emp,
         days=days,
         manual=manual,
+        schedule=parse_schedule(emp["schedule"]),
+        schedule_text=describe_schedule(parse_schedule(emp["schedule"])),
         month=f"{year:04d}-{month:02d}",
         total_worked=sum(d.worked_minutes for d in days),
         total_expected=sum(d.expected_minutes for d in days),
@@ -188,7 +267,14 @@ def report_csv(emp_id):
                 fmt_minutes(d.worked_minutes),
                 fmt_minutes(d.expected_minutes),
                 fmt_minutes(d.balance_minutes),
-                "Marcação faltando" if d.incomplete else "",
+                "; ".join(
+                    x
+                    for x in [
+                        f"Feriado: {d.holiday}" if d.holiday else "",
+                        "Marcação faltando" if d.incomplete else "",
+                    ]
+                    if x
+                ),
             ]
         )
     filename = f"espelho_{emp['code']}_{year:04d}-{month:02d}.csv"
@@ -229,3 +315,61 @@ def manual_punch(emp_id):
         flash("Marcação incluída.", "ok")
     month = ts.strftime("%Y-%m") if ts else None
     return redirect(url_for("admin.report", emp_id=emp_id, mes=month))
+
+
+@bp.route("/feriados", methods=["GET", "POST"])
+@login_required
+def holidays():
+    db = get_db()
+    year = request.args.get("ano", type=int) or now().year
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        try:
+            day = date.fromisoformat(request.form.get("day", ""))
+        except ValueError:
+            day = None
+        if day is None or not name:
+            flash("Informe a data e o nome do feriado.", "error")
+        else:
+            db.execute(
+                "INSERT OR REPLACE INTO holidays (day, name) VALUES (?, ?)",
+                (day.isoformat(), name),
+            )
+            db.commit()
+            flash(f"Feriado {day:%d/%m/%Y} salvo.", "ok")
+            year = day.year
+        return redirect(url_for("admin.holidays", ano=year))
+
+    rows = db.execute(
+        "SELECT * FROM holidays WHERE day LIKE ? ORDER BY day", (f"{year:04d}-%",)
+    ).fetchall()
+    items = [(date.fromisoformat(r["day"]), r["name"]) for r in rows]
+    return render_template("admin/holidays.html", holidays=items, year=year)
+
+
+@bp.post("/feriados/nacionais")
+@login_required
+def import_holidays():
+    year = request.form.get("year", type=int) or now().year
+    optional = bool(request.form.get("optional"))
+    db = get_db()
+    added = 0
+    for day, name in national_holidays(year, optional):
+        cur = db.execute(
+            "INSERT OR IGNORE INTO holidays (day, name) VALUES (?, ?)",
+            (day.isoformat(), name),
+        )
+        added += cur.rowcount
+    db.commit()
+    flash(f"{added} feriado(s) nacional(is) de {year} incluído(s).", "ok")
+    return redirect(url_for("admin.holidays", ano=year))
+
+
+@bp.post("/feriados/<day>/excluir")
+@login_required
+def delete_holiday(day):
+    db = get_db()
+    db.execute("DELETE FROM holidays WHERE day = ?", (day,))
+    db.commit()
+    flash("Feriado removido.", "ok")
+    return redirect(url_for("admin.holidays", ano=day[:4]))
