@@ -94,3 +94,18 @@ fieldset.people label.all { font-weight: 600; padding-bottom: 8px; border-bottom
 label.check.inactive { color: var(--muted); }
 .toolbar h2 { margin: 0; flex: 1; }
 .toolbar { margin: 12px 0; }
+label.check.break { grid-column: 1 / -1; flex-wrap: wrap; }
+details { margin: 2px 0; }
+details summary { cursor: pointer; color: var(--brand); font-size: .9rem; }
+form.mini { display: grid; gap: 8px; margin: 8px 0 12px; padding: 10px; background: var(--bg);
+            border-radius: 6px; max-width: 360px; }
+form.mini label { margin: 0; }
+button.danger { background: var(--err); color: #fff; }
+button.danger:hover { background: var(--err); filter: brightness(.9); }
+tr.voided td { color: var(--muted); background: var(--row-off); font-size: .9rem; }
+table.punches td { vertical-align: top; }
+.color-field { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.color-field input[type=color] { width: 48px; height: 42px; padding: 2px; margin: 0; cursor: pointer; }
+.color-field input:not([type=color]) { margin: 0; font-family: monospace; }
+.logo-preview { max-height: 80px; max-width: 240px; border: 1px solid var(--border); border-radius: 6px;
+                padding: 6px; background: var(--header-bg); }

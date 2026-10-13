@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Ponto{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>:root { {{ theme_css }} }</style>
 </head>
 <body>
   <header>
     <a class="brand" href="{{ url_for('kiosk.index') }}">
-      {% if has_logo %}<img src="{{ url_for('static', filename='logo.png') }}" alt="">{% endif %}
+      {% if has_logo %}<img src="{{ url_for('kiosk.logo') }}" alt="">{% endif %}
       Ponto
     </a>
     <nav>
@@ -17,6 +18,7 @@
         <a href="{{ url_for('admin.employees') }}">Funcionários</a>
         <a href="{{ url_for('admin.summary') }}">Relatório</a>
         <a href="{{ url_for('admin.holidays') }}">Feriados</a>
+        <a href="{{ url_for('admin.appearance') }}">Aparência</a>
         <form method="post" action="{{ url_for('admin.logout') }}" class="inline">
           <button class="link">Sair</button>
         </form>

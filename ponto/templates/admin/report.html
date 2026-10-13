@@ -15,13 +15,14 @@
   <tbody>
   {% for d in days %}
     <tr class="{{ 'off' if d.day_off }} {{ 'incomplete' if d.incomplete }}">
-      <td>{{ d.day.strftime('%d/%m') }} {{ ['seg','ter','qua','qui','sex','sáb','dom'][d.day.weekday()] }}</td>
+      <td><a href="{{ url_for('admin.day', emp_id=emp.id, day=d.day.isoformat()) }}" title="Ver e corrigir marcações">{{ d.day.strftime('%d/%m') }} {{ ['seg','ter','qua','qui','sex','sáb','dom'][d.day.weekday()] }}</a></td>
       <td>
         {% for p in d.punches %}
           {% set note = manual.get(p.isoformat()) %}
           <span {% if note %}class="manual" title="Ajuste: {{ note }}"{% endif %}>{{ p.strftime('%H:%M') }}{% if note %}*{% endif %}</span>
         {% endfor %}
         {% if d.holiday %}<span class="tag">Feriado: {{ d.holiday }}</span>{% endif %}
+        {% if d.day.isoformat() in voided_days %}<span class="tag">corrigido</span>{% endif %}
         {% if d.incomplete %}<em>(marcação faltando)</em>{% endif %}
       </td>
       <td>{{ d.worked_minutes | hhmm }}</td>
@@ -41,7 +42,8 @@
   <div><span>Saldo do mês</span><strong>{{ totals.balance | hhmm }}</strong></div>
   <div><span>Faltas</span><strong>{{ totals.absences }} dia(s)</strong></div>
 </div>
-<p class="hint">* marcação incluída manualmente pelo administrador (passe o mouse para ver a justificativa).</p>
+<p class="hint">Clique na data para ver, corrigir ou incluir marcações daquele dia.
+  * marcação incluída ou corrigida pelo administrador (passe o mouse para ver a justificativa).</p>
 
 <section class="card">
   <h2>Incluir marcação esquecida</h2>

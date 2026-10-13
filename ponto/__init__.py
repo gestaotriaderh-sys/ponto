@@ -18,6 +18,7 @@ def create_app(test_config=None):
         # Intervalo mínimo entre duas marcações do mesmo funcionário,
         # para evitar registros duplicados por clique duplo.
         MIN_PUNCH_INTERVAL_SECONDS=60,
+        MAX_CONTENT_LENGTH=5 * 1024 * 1024,  # limite de upload (logotipo)
     )
     if test_config:
         app.config.update(test_config)
@@ -40,7 +41,10 @@ def create_app(test_config=None):
 
     app.jinja_env.filters["hhmm"] = fmt_minutes
 
-    # Logotipo opcional: basta colocar ponto/static/logo.png.
-    has_logo = os.path.exists(os.path.join(app.static_folder, "logo.png"))
-    app.jinja_env.globals["has_logo"] = has_logo
+    from . import theme
+
+    @app.context_processor
+    def inject_theme():
+        return {"theme_css": theme.css_variables(), "has_logo": theme.logo_path() is not None}
+
     return app

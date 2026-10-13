@@ -3,17 +3,18 @@
 {% block content %}
 <h1>Funcionários</h1>
 <table>
-  <thead><tr><th>Matrícula</th><th>Nome</th><th>Jornada semanal</th><th>Situação</th><th></th></tr></thead>
+  <thead><tr><th>Matrícula</th><th>Nome</th><th>Jornada semanal</th><th>Intervalo</th><th>Situação</th><th></th></tr></thead>
   <tbody>
   {% for e in employees %}
     <tr class="{{ '' if e.active else 'inactive' }}">
       <td>{{ e.code }}</td>
       <td>{{ e.name }}</td>
       <td>{{ e.schedule_text }}</td>
+      <td>{{ 'Sim' if e.has_break else 'Não' }}</td>
       <td>{{ 'Ativo' if e.active else 'Inativo' }}</td>
       <td class="actions">
         <a href="{{ url_for('admin.report', emp_id=e.id) }}">Espelho de ponto</a>
-        <a href="{{ url_for('admin.edit_employee', emp_id=e.id) }}">Editar jornada</a>
+        <a href="{{ url_for('admin.edit_employee', emp_id=e.id) }}">Editar</a>
         <form method="post" action="{{ url_for('admin.toggle_active', emp_id=e.id) }}" class="inline">
           <button class="link">{{ 'Desativar' if e.active else 'Reativar' }}</button>
         </form>
@@ -24,7 +25,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="5">Nenhum funcionário cadastrado.</td></tr>
+    <tr><td colspan="6">Nenhum funcionário cadastrado.</td></tr>
   {% endfor %}
   </tbody>
 </table>

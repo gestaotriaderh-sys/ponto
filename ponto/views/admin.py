@@ -1,10 +1,12 @@
 """Área administrativa: cadastro de funcionários, ajustes e relatórios."""
 
+import calendar
 import csv
 import functools
 import hmac
 import io
-import calendar
+import os
+import re
 from datetime import date, datetime, timedelta
 
 from flask import (
@@ -29,10 +31,12 @@ from ..calc import (
     parse_hours,
     parse_schedule,
     parse_ts,
+    punch_label,
     schedule_for,
 )
 from ..clock import now
-from ..db import get_db
+from .. import theme
+from ..db import VALID_PUNCH, get_db, set_setting
 from ..holidays import national_holidays
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -93,6 +97,10 @@ def _schedule_rows(schedule):
 DEFAULT_SCHEDULE = [480, 480, 480, 480, 480, 0, 0]
 
 
+def _has_break_from_form():
+    return 1 if request.form.get("has_break") else 0
+
+
 @bp.route("/", methods=["GET", "POST"])
 @login_required
 def employees():
@@ -112,13 +120,14 @@ def employees():
             flash(f"Já existe um funcionário com a matrícula {code}.", "error")
         else:
             cur = db.execute(
-                "INSERT INTO employees (code, name, pin_hash, schedule, created_at)"
-                " VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO employees (code, name, pin_hash, schedule, has_break, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     code,
                     name,
                     generate_password_hash(pin),
                     ",".join(map(str, schedule)),
+                    _has_break_from_form(),
                     now().isoformat(),
                 ),
             )
@@ -137,6 +146,7 @@ def employees():
         "admin/employees.html",
         employees=employees,
         schedule_rows=_schedule_rows(DEFAULT_SCHEDULE),
+        has_break=True,
     )
 
 
@@ -188,7 +198,10 @@ def edit_employee(emp_id):
             )
         else:
             db = get_db()
-            db.execute("UPDATE employees SET name = ? WHERE id = ?", (name, emp_id))
+            db.execute(
+                "UPDATE employees SET name = ?, has_break = ? WHERE id = ?",
+                (name, _has_break_from_form(), emp_id),
+            )
             if schedule != schedule_for(history, start_day):
                 _save_schedule(emp_id, start_day, schedule)
                 flash(
@@ -208,6 +221,7 @@ def edit_employee(emp_id):
         emp=emp,
         today=today,
         schedule_rows=_schedule_rows(current),
+        has_break=emp["has_break"],
         history=[
             (start, describe_schedule(sched), start > today)
             for start, sched in reversed(history)
@@ -276,7 +290,8 @@ def _load_period(emp, first, last):
     """Marcações e resumo diário do funcionário de `first` a `last`."""
     start, end = first.isoformat(), (last + timedelta(days=1)).isoformat()
     rows = get_db().execute(
-        "SELECT * FROM punches WHERE employee_id = ? AND ts >= ? AND ts < ? ORDER BY ts",
+        f"SELECT * FROM punches WHERE employee_id = ? AND ts >= ? AND ts < ? AND {VALID_PUNCH}"
+        " ORDER BY ts",
         (emp["id"], start, end),
     ).fetchall()
     holidays = {
@@ -309,8 +324,18 @@ def report(emp_id):
     year, month = _month_param()
     rows, days = _load_month(emp, year, month)
     manual = {r["ts"]: r["note"] for r in rows if r["manual"]}
+    first, last = days[0].day.isoformat(), (days[-1].day + timedelta(days=1)).isoformat()
+    voided_days = {
+        r["ts"][:10]
+        for r in get_db().execute(
+            f"SELECT ts FROM punches WHERE employee_id = ? AND ts >= ? AND ts < ?"
+            f" AND NOT {VALID_PUNCH}",
+            (emp_id, first, last),
+        )
+    }
     return render_template(
         "admin/report.html",
+        voided_days=voided_days,
         emp=emp,
         days=days,
         manual=manual,
@@ -388,8 +413,115 @@ def manual_punch(emp_id):
         )
         db.commit()
         flash("Marcação incluída.", "ok")
+    if ts and request.form.get("voltar") == "dia":
+        return redirect(url_for("admin.day", emp_id=emp_id, day=ts.date().isoformat()))
     month = ts.strftime("%Y-%m") if ts else None
     return redirect(url_for("admin.report", emp_id=emp_id, mes=month))
+
+
+@bp.get("/funcionario/<int:emp_id>/dia/<day>")
+@login_required
+def day(emp_id, day):
+    """Detalhe de um dia: corrigir, desconsiderar ou incluir marcações."""
+    emp = _get_employee(emp_id)
+    try:
+        the_day = date.fromisoformat(day)
+    except ValueError:
+        the_day = None
+    if emp is None or the_day is None:
+        return redirect(url_for("admin.employees"))
+    rows = get_db().execute(
+        "SELECT p.*, v.reason AS void_reason, v.created_at AS voided_at"
+        " FROM punches p LEFT JOIN punch_voids v ON v.punch_id = p.id"
+        " WHERE p.employee_id = ? AND p.ts >= ? AND p.ts < ? ORDER BY p.ts, p.id",
+        (emp_id, the_day.isoformat(), (the_day + timedelta(days=1)).isoformat()),
+    ).fetchall()
+    punches, n = [], 0
+    for r in rows:
+        label = None
+        if r["void_reason"] is None:
+            label = punch_label(n, bool(emp["has_break"]))
+            n += 1
+        punches.append((r, parse_ts(r["ts"]), label))
+    summary = _load_period(emp, the_day, the_day)[1][0]
+    return render_template(
+        "admin/day.html",
+        emp=emp,
+        day=the_day,
+        punches=punches,
+        summary=summary,
+        next_label=punch_label(n, bool(emp["has_break"])),
+        weekday=WEEKDAYS[the_day.weekday()],
+    )
+
+
+def _get_punch(emp_id, punch_id):
+    return get_db().execute(
+        f"SELECT * FROM punches WHERE id = ? AND employee_id = ? AND {VALID_PUNCH}",
+        (punch_id, emp_id),
+    ).fetchone()
+
+
+def _void(punch_id, reason):
+    get_db().execute(
+        "INSERT INTO punch_voids (punch_id, reason, created_at) VALUES (?, ?, ?)",
+        (punch_id, reason, now().isoformat()),
+    )
+
+
+@bp.post("/funcionario/<int:emp_id>/marcacao/<int:punch_id>/corrigir")
+@login_required
+def fix_punch(emp_id, punch_id):
+    """Troca o horário de uma marcação: a original é desconsiderada e uma
+    nova, manual, é incluída com a justificativa."""
+    punch = _get_punch(emp_id, punch_id)
+    if punch is None:
+        return redirect(url_for("admin.employees"))
+    old = parse_ts(punch["ts"])
+    note = request.form.get("note", "").strip()
+    try:
+        h, m = map(int, request.form.get("time", "").split(":")[:2])
+        new = old.replace(hour=h, minute=m, second=0)
+    except ValueError:
+        new = None
+    if new is None:
+        flash("Horário inválido.", "error")
+    elif not note:
+        flash("A justificativa é obrigatória.", "error")
+    elif new > now():
+        flash("Não é possível registrar um horário no futuro.", "error")
+    elif new == old.replace(second=0):
+        flash("O horário informado é igual ao atual.", "error")
+    else:
+        db = get_db()
+        _void(punch_id, f"Corrigida para {new:%H:%M}: {note}")
+        db.execute(
+            "INSERT INTO punches (employee_id, ts, manual, note, ip, created_at)"
+            " VALUES (?, ?, 1, ?, ?, ?)",
+            (emp_id, new.isoformat(), f"Correção de {old:%H:%M}: {note}",
+             request.remote_addr, now().isoformat()),
+        )
+        db.commit()
+        flash(f"Marcação das {old:%H:%M} corrigida para {new:%H:%M}.", "ok")
+    return redirect(url_for("admin.day", emp_id=emp_id, day=old.date().isoformat()))
+
+
+@bp.post("/funcionario/<int:emp_id>/marcacao/<int:punch_id>/desconsiderar")
+@login_required
+def void_punch(emp_id, punch_id):
+    """Tira uma marcação do cálculo (ex.: duplicada). A original fica no histórico."""
+    punch = _get_punch(emp_id, punch_id)
+    if punch is None:
+        return redirect(url_for("admin.employees"))
+    ts = parse_ts(punch["ts"])
+    note = request.form.get("note", "").strip()
+    if not note:
+        flash("A justificativa é obrigatória.", "error")
+    else:
+        _void(punch_id, note)
+        get_db().commit()
+        flash(f"Marcação das {ts:%H:%M} desconsiderada.", "ok")
+    return redirect(url_for("admin.day", emp_id=emp_id, day=ts.date().isoformat()))
 
 
 @bp.route("/feriados", methods=["GET", "POST"])
@@ -551,4 +683,46 @@ def summary_csv():
         "\ufeff" + out.getvalue(),
         mimetype="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --- Aparência -----------------------------------------------------------
+
+
+def _remove_logo():
+    path = theme.logo_path()
+    if path:
+        os.remove(path)
+
+
+@bp.route("/aparencia", methods=["GET", "POST"])
+@login_required
+def appearance():
+    if request.method == "POST":
+        db = get_db()
+        if request.form.get("restore"):
+            db.execute("DELETE FROM settings WHERE key LIKE 'theme_%'")
+            db.commit()
+            flash("Cores padrão restauradas.", "ok")
+            return redirect(url_for("admin.appearance"))
+        values = {k: request.form.get(k, "").strip().lower() for k in theme.DEFAULTS}
+        bad = [theme.LABELS[k] for k, v in values.items() if not re.fullmatch(r"#[0-9a-f]{6}", v)]
+        upload = request.files.get("logo")
+        ext = upload.filename.rsplit(".", 1)[-1].lower() if upload and upload.filename else None
+        if bad:
+            flash(f"Cor inválida: {', '.join(bad)}.", "error")
+        elif ext is not None and ext not in theme.LOGO_TYPES:
+            flash("O logotipo deve ser uma imagem PNG, JPG ou WEBP.", "error")
+        else:
+            for k, v in values.items():
+                set_setting(f"theme_{k}", v)
+            db.commit()
+            if ext or request.form.get("remove_logo"):
+                _remove_logo()
+            if ext:
+                upload.save(os.path.join(current_app.instance_path, f"logo.{ext}"))
+            flash("Aparência salva.", "ok")
+        return redirect(url_for("admin.appearance"))
+    return render_template(
+        "admin/appearance.html", colors=theme.colors(), labels=theme.LABELS
     )

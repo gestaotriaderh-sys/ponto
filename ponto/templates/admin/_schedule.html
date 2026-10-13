@@ -5,3 +5,6 @@
     <label>{{ label }} <input name="{{ field }}" value="{{ value }}" placeholder="folga" inputmode="decimal"></label>
   {% endfor %}
 </fieldset>
+<label class="check break"><input type="checkbox" name="has_break" value="1"
+  {{ 'checked' if has_break }}> Tem intervalo durante a jornada
+  <span class="hint">(4 marcações: entrada, saída intervalo, retorno intervalo e saída; sem intervalo são só entrada e saída)</span></label>

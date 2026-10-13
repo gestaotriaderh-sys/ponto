@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS employees (
     pin_hash TEXT NOT NULL,
     daily_minutes INTEGER NOT NULL DEFAULT 480,  -- obsoleto, ver tabela schedules
     schedule TEXT NOT NULL DEFAULT '480,480,480,480,480,0,0',  -- obsoleto
+    has_break INTEGER NOT NULL DEFAULT 1,  -- tem intervalo durante a jornada
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -25,6 +26,20 @@ CREATE TABLE IF NOT EXISTS punches (
     note TEXT,
     ip TEXT,
     created_at TEXT NOT NULL
+);
+
+-- Marcações desconsideradas pelo administrador (ex.: horário errado ou
+-- duplicado). A marcação original continua gravada e aparece riscada no
+-- detalhe do dia; ela só deixa de entrar no cálculo.
+CREATE TABLE IF NOT EXISTS punch_voids (
+    punch_id INTEGER PRIMARY KEY REFERENCES punches(id),
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 -- Histórico de jornadas. Cada linha vale de start_day até a véspera da
@@ -45,6 +60,18 @@ CREATE TABLE IF NOT EXISTS holidays (
 );
 
 CREATE INDEX IF NOT EXISTS idx_punches_emp_ts ON punches(employee_id, ts);
+
+CREATE TRIGGER IF NOT EXISTS punch_voids_no_update
+BEFORE UPDATE ON punch_voids
+BEGIN
+    SELECT RAISE(ABORT, 'correções de ponto não podem ser alteradas');
+END;
+
+CREATE TRIGGER IF NOT EXISTS punch_voids_no_delete
+BEFORE DELETE ON punch_voids
+BEGIN
+    SELECT RAISE(ABORT, 'correções de ponto não podem ser apagadas');
+END;
 
 CREATE TRIGGER IF NOT EXISTS punches_no_update
 BEFORE UPDATE ON punches
@@ -103,3 +130,19 @@ def _migrate(db):
             " || daily_minutes || ',' || daily_minutes || ',0,0'"
         )
         db.commit()
+    if cols and "has_break" not in cols:
+        db.execute("ALTER TABLE employees ADD COLUMN has_break INTEGER NOT NULL DEFAULT 1")
+        db.commit()
+
+
+# Marcações válidas: todas, menos as desconsideradas pelo administrador.
+VALID_PUNCH = "id NOT IN (SELECT punch_id FROM punch_voids)"
+
+
+def get_setting(key, default=None):
+    row = get_db().execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key, value):
+    get_db().execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))

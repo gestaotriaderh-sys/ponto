@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Aparência{% endblock %}
+{% block content %}
+<h1>Aparência</h1>
+<section class="card">
+  <form method="post" enctype="multipart/form-data">
+    <h2>Cores</h2>
+    <div class="grid">
+      {% for key, label in labels.items() %}
+        <label>{{ label }}
+          <span class="color-field">
+            <input type="color" value="{{ colors[key] }}" data-for="{{ key }}">
+            <input name="{{ key }}" value="{{ colors[key] }}" pattern="#[0-9a-fA-F]{6}" required>
+          </span>
+        </label>
+      {% endfor %}
+    </div>
+    <p class="hint">Clique no quadrado para escolher a cor ou digite o código (ex.: <code>#5b2c83</code>).</p>
+
+    <h2>Logotipo</h2>
+    {% if has_logo %}
+      <p><img src="{{ url_for('kiosk.logo') }}" alt="Logotipo atual" class="logo-preview"></p>
+      <label class="check"><input type="checkbox" name="remove_logo" value="1"> Remover logotipo</label>
+    {% endif %}
+    <label>{{ 'Trocar' if has_logo else 'Enviar' }} logotipo (PNG, JPG ou WEBP)
+      <input type="file" name="logo" accept=".png,.jpg,.jpeg,.webp">
+    </label>
+
+    <div class="toolbar">
+      <button type="submit">Salvar</button>
+      <button type="submit" name="restore" value="1" class="button secondary"
+              formnovalidate onclick="return confirm('Voltar para as cores padrão?')">Restaurar cores padrão</button>
+    </div>
+  </form>
+</section>
+<script>
+  // Mantém o seletor de cor e o campo de texto sincronizados e mostra a prévia.
+  document.querySelectorAll("input[type=color]").forEach(picker => {
+    const text = document.querySelector(`input[name=${picker.dataset.for}]`);
+    const preview = () => {
+      const vars = {brand: "--brand", header_bg: "--header-bg", header_fg: "--header-fg"};
+      document.documentElement.style.setProperty(vars[picker.dataset.for], picker.value);
+    };
+    picker.addEventListener("input", () => { text.value = picker.value; preview(); });
+    text.addEventListener("input", () => {
+      if (/^#[0-9a-fA-F]{6}$/.test(text.value)) { picker.value = text.value; preview(); }
+    });
+  });
+</script>
+{% endblock %}

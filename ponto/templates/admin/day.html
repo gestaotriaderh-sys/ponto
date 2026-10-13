@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ emp.name }} — {{ day.strftime('%d/%m/%Y') }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('admin.report', emp_id=emp.id, mes=day.strftime('%Y-%m')) }}">← Voltar ao espelho de ponto</a></p>
+<h1>{{ emp.name }} — {{ weekday }}, {{ day.strftime('%d/%m/%Y') }}</h1>
+<p class="hint">
+  {{ 'Com intervalo' if emp.has_break else 'Sem intervalo' }} ·
+  Trabalhado {{ summary.worked_minutes | hhmm }} · Esperado {{ summary.expected_minutes | hhmm }} ·
+  Saldo {{ summary.balance_minutes | hhmm }}
+  {% if summary.holiday %}· <span class="tag">Feriado: {{ summary.holiday }}</span>{% endif %}
+  {% if summary.incomplete %}· <span class="tag warn">marcação faltando</span>{% endif %}
+</p>
+
+<table class="punches">
+  <thead><tr><th>Horário</th><th>Tipo</th><th>Origem</th><th>Ações</th></tr></thead>
+  <tbody>
+  {% for p, ts, label in punches %}
+    {% if p.void_reason is none %}
+    <tr>
+      <td><strong>{{ ts.strftime('%H:%M') }}</strong></td>
+      <td>{{ label }}</td>
+      <td>{% if p.manual %}<span class="tag">Ajuste</span> <span class="hint">{{ p.note }}</span>{% else %}Registro do funcionário{% endif %}</td>
+      <td>
+        <details>
+          <summary>Corrigir horário</summary>
+          <form method="post" class="mini" action="{{ url_for('admin.fix_punch', emp_id=emp.id, punch_id=p.id) }}">
+            <label>Novo horário <input type="time" name="time" value="{{ ts.strftime('%H:%M') }}" required></label>
+            <label>Justificativa <input name="note" required placeholder="ex.: marcou atrasado por erro"></label>
+            <button type="submit">Salvar correção</button>
+          </form>
+        </details>
+        <details>
+          <summary>Desconsiderar</summary>
+          <form method="post" class="mini" action="{{ url_for('admin.void_punch', emp_id=emp.id, punch_id=p.id) }}">
+            <label>Justificativa <input name="note" required placeholder="ex.: marcação duplicada"></label>
+            <button type="submit" class="danger">Desconsiderar marcação</button>
+          </form>
+        </details>
+      </td>
+    </tr>
+    {% else %}
+    <tr class="voided">
+      <td><s>{{ ts.strftime('%H:%M') }}</s></td>
+      <td colspan="3">Desconsiderada em {{ p.voided_at[8:10] }}/{{ p.voided_at[5:7] }} às {{ p.voided_at[11:16] }} — {{ p.void_reason }}</td>
+    </tr>
+    {% endif %}
+  {% else %}
+    <tr><td colspan="4">Nenhuma marcação neste dia.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<section class="card">
+  <h2>Incluir marcação</h2>
+  <p class="hint">Use quando o funcionário esqueceu de marcar (por exemplo, a saída). A próxima marcação será: <strong>{{ next_label }}</strong>.</p>
+  <form method="post" action="{{ url_for('admin.manual_punch', emp_id=emp.id) }}" class="grid" id="incluir">
+    <input type="hidden" name="voltar" value="dia">
+    <input type="hidden" name="ts" id="ts">
+    <label>Horário <input type="time" id="hora" required></label>
+    <label>Justificativa <input name="note" required placeholder="ex.: esqueceu de marcar a saída"></label>
+    <button type="submit">Incluir</button>
+  </form>
+</section>
+<p class="hint">Marcações nunca são apagadas: as corrigidas ou desconsideradas ficam registradas acima, riscadas, com a justificativa.</p>
+<script>
+  document.getElementById("incluir").addEventListener("submit", () => {
+    document.getElementById("ts").value = "{{ day.isoformat() }}T" + document.getElementById("hora").value;
+  });
+</script>
+{% endblock %}

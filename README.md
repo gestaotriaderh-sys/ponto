@@ -26,7 +26,14 @@ precisa de servidor de banco de dados.
     funcionários escolhidos ou todos, com horas trabalhadas, esperadas,
     horas extras, horas faltando, saldo e faltas (com CSV);
   - espelho de ponto mensal com horas trabalhadas, esperadas e saldo por dia;
-  - inclusão de marcação esquecida com justificativa;
+  - indicação, por funcionário, se a jornada tem intervalo (4 marcações:
+    entrada, saída intervalo, retorno intervalo e saída) ou não (entrada e
+    saída);
+  - tela de cada dia (clique na data no espelho de ponto) para corrigir o
+    horário de uma marcação, desconsiderar uma marcação errada ou incluir
+    uma esquecida, sempre com justificativa. A marcação original nunca é
+    apagada: fica registrada, riscada, com o motivo;
+  - tela Aparência para escolher as cores e enviar o logotipo da empresa;
   - exportação do espelho em CSV (abre no Excel).
 
 ## Como rodar
@@ -56,9 +63,9 @@ Para produção, use um servidor WSGI (ex.: `pip install waitress` e
 
 ## Cores e logotipo
 
-Todas as cores ficam no início de `ponto/static/style.css`, no bloco
-"CORES DA EMPRESA". Para mostrar o logotipo no topo, salve a imagem como
-`ponto/static/logo.png` e reinicie o programa.
+Na área administrativa, menu **Aparência**: escolha a cor principal, as
+cores da barra do topo e envie o logotipo (PNG, JPG ou WEBP). Tudo fica
+salvo na pasta `instance`, junto com os dados.
 
 ## Testes
 

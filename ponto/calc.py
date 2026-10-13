@@ -15,9 +15,14 @@ WEEKDAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Doming
 WEEKDAYS_SHORT = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
 
 
-def punch_label(index):
-    """Rótulo da marcação de número `index` (0, 1, 2...) dentro do dia."""
-    if index < len(PUNCH_LABELS):
+def punch_label(index, has_break=True):
+    """Rótulo da marcação de número `index` (0, 1, 2...) dentro do dia.
+
+    Com intervalo: Entrada, Saída intervalo, Retorno intervalo, Saída.
+    Sem intervalo: Entrada, Saída. Marcações além dessas alternam entre
+    Entrada e Saída.
+    """
+    if has_break and index < len(PUNCH_LABELS):
         return PUNCH_LABELS[index]
     return "Entrada" if index % 2 == 0 else "Saída"
 

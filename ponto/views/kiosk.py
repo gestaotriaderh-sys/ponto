@@ -2,12 +2,23 @@
 
 from datetime import timedelta
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 from werkzeug.security import check_password_hash
 
 from ..calc import parse_ts, punch_label
 from ..clock import now
-from ..db import get_db
+from .. import theme
+from ..db import VALID_PUNCH, get_db
 
 bp = Blueprint("kiosk", __name__)
 
@@ -15,6 +26,14 @@ bp = Blueprint("kiosk", __name__)
 @bp.get("/")
 def index():
     return render_template("kiosk.html", now=now())
+
+
+@bp.get("/logo")
+def logo():
+    path = theme.logo_path()
+    if path is None:
+        abort(404)
+    return send_file(path, mimetype=theme.LOGO_TYPES[path.rsplit(".", 1)[-1]], max_age=0)
 
 
 @bp.post("/registrar")
@@ -34,7 +53,8 @@ def punch():
     today = [
         parse_ts(r["ts"])
         for r in db.execute(
-            "SELECT ts FROM punches WHERE employee_id = ? AND ts >= ? ORDER BY ts",
+            f"SELECT ts FROM punches WHERE employee_id = ? AND ts >= ? AND {VALID_PUNCH}"
+            " ORDER BY ts",
             (emp["id"], day_start),
         )
     ]
@@ -56,7 +76,7 @@ def punch():
         "receipt.html",
         emp=emp,
         ts=ts,
-        label=punch_label(len(today)),
+        label=punch_label(len(today), bool(emp["has_break"])),
         punch_id=cur.lastrowid,
         today=today + [ts],
     )
