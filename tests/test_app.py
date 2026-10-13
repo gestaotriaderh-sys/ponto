@@ -77,6 +77,7 @@ def test_punches_are_immutable(app, admin):
 
 def test_custom_schedule(admin, clock):
     # Trabalha terça a sábado; sábado 4h, terça 6h30.
+    clock.value = datetime(2026, 10, 1, 8, 0)
     add_employee(admin, hours=["", "6:30", "8", "8", "8", "4", ""])
     body = admin.get("/admin/").get_data(as_text=True)
     assert "ter 06:30 · qua–sex 08:00 · sáb 04:00" in body
@@ -90,16 +91,25 @@ def test_custom_schedule(admin, clock):
 
 def test_edit_schedule_rejects_invalid_hours(admin):
     add_employee(admin)
-    data = {"name": "Maria S.", **{f"dia_{i}": "abc" if i == 0 else "" for i in range(7)}}
+    data = {
+        "name": "Maria S.",
+        "start_day": "2026-10-13",
+        **{f"dia_{i}": "abc" if i == 0 else "" for i in range(7)},
+    }
     r = admin.post("/admin/funcionario/1/editar", data=data, follow_redirects=True)
     assert "Horas inválidas" in r.get_data(as_text=True)
     data["dia_0"] = "7,5"
     r = admin.post("/admin/funcionario/1/editar", data=data, follow_redirects=True)
     assert "seg 07:30" in r.get_data(as_text=True)
+    data["start_day"] = "2026-10-12"
+    r = admin.post("/admin/funcionario/1/editar", data=data, follow_redirects=True)
+    assert "não pode começar numa data passada" in r.get_data(as_text=True)
 
 
 def test_holidays(admin, clock):
+    clock.value = datetime(2026, 10, 1, 8, 0)
     add_employee(admin)
+    clock.value = datetime(2026, 10, 13, 8, 0)
     r = admin.post("/admin/feriados/nacionais", data={"year": "2026"}, follow_redirects=True)
     body = r.get_data(as_text=True)
     assert "10 feriado(s)" in body and "Nossa Senhora Aparecida" in body
@@ -131,4 +141,54 @@ def test_migrates_old_database(tmp_path, clock):
     con.close()
     create_app({"TESTING": True, "DATABASE": str(path), "NOW": clock})
     con = sqlite3.connect(path)
-    assert con.execute("SELECT schedule FROM employees").fetchone()[0] == "360,360,360,360,360,0,0"
+    assert con.execute("SELECT start_day, schedule FROM schedules").fetchall() == [
+        ("2026-01-01", "360,360,360,360,360,0,0")
+    ]
+
+
+def edit_schedule(admin, start_day, hours):
+    data = {"name": "Maria Silva", "start_day": start_day}
+    data.update({f"dia_{i}": h for i, h in enumerate(hours)})
+    return admin.post("/admin/funcionario/1/editar", data=data, follow_redirects=True)
+
+
+def test_schedule_change_applies_only_from_start_day(admin, clock):
+    clock.value = datetime(2026, 10, 1, 8, 0)
+    add_employee(admin)  # seg–sex 8h desde 01/10
+    clock.value = datetime(2026, 10, 14, 9, 0)
+    body = edit_schedule(admin, "2026-10-14", ["6"] * 5 + ["", ""]).get_data(as_text=True)
+    assert "vale a partir de 14/10/2026" in body
+
+    clock.value = datetime(2026, 10, 31, 12, 0)
+    csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
+    assert "13/10/2026;;00:00;08:00;-08:00;" in csv  # jornada antiga
+    assert "14/10/2026;;00:00;06:00;-06:00;" in csv  # jornada nova
+
+
+def test_future_schedule_change_can_be_cancelled(admin, clock):
+    add_employee(admin)
+    edit_schedule(admin, "2026-11-01", ["4"] * 5 + ["", ""])
+    body = admin.get("/admin/funcionario/1/editar").get_data(as_text=True)
+    assert "programada" in body and "01/11/2026" in body
+    assert "seg–sex 08:00" in admin.get("/admin/").get_data(as_text=True)  # ainda vale a atual
+
+    r = admin.post("/admin/funcionario/1/jornada/2026-11-01/excluir", follow_redirects=True)
+    assert "cancelada" in r.get_data(as_text=True)
+    # jornada já em vigor não pode ser apagada
+    r = admin.post("/admin/funcionario/1/jornada/2026-10-13/excluir", follow_redirects=True)
+    assert "ainda não começaram" in r.get_data(as_text=True)
+
+
+def test_monthly_summary(admin, clock):
+    clock.value = datetime(2026, 10, 1, 7, 0)
+    add_employee(admin, code="001")
+    for ts in ["08:00", "18:00"]:  # 10h na quinta 01/10 -> 2h extras
+        h, m = map(int, ts.split(":"))
+        clock.value = datetime(2026, 10, 1, h, m)
+        punch(admin, code="001")
+    clock.value = datetime(2026, 10, 2, 23, 0)  # sexta 02/10 sem marcação -> falta
+
+    body = admin.get("/admin/relatorio?mes=2026-10").get_data(as_text=True)
+    assert "Relatório de horas — 10/2026" in body and "Maria Silva" in body
+    csv = admin.get("/admin/relatorio.csv?mes=2026-10").get_data(as_text=True)
+    assert "001;Maria Silva;10:00;16:00;02:00;08:00;-06:00;1;0" in csv

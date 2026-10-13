@@ -6,6 +6,7 @@ from ponto.calc import (
     describe_schedule,
     fmt_minutes,
     month_summary,
+    month_totals,
     parse_hours,
     punch_label,
     worked_minutes,
@@ -31,7 +32,7 @@ MON_FRI_8H = [480] * 5 + [0, 0]
 
 def test_month_summary_expected_only_on_past_workdays():
     days = month_summary(
-        2026, 10, [dt(8, 0, 1), dt(17, 0, 1)], MON_FRI_8H, today=date(2026, 10, 5)
+        2026, 10, [dt(8, 0, 1), dt(17, 0, 1)], [(date.min, MON_FRI_8H)], today=date(2026, 10, 5)
     )
     assert len(days) == 31
     assert days[0].worked_minutes == 540 and days[0].balance_minutes == 60
@@ -55,7 +56,8 @@ def test_month_summary_holiday_and_saturday():
     schedule = [480] * 5 + [240, 0]
     holidays = {date(2026, 10, 12): "Nossa Senhora Aparecida"}
     days = month_summary(
-        2026, 10, [dt(8, 0, 12), dt(10, 0, 12)], schedule, holidays, date(2026, 10, 31)
+        2026, 10, [dt(8, 0, 12), dt(10, 0, 12)], [(date.min, schedule)], holidays,
+        date(2026, 10, 31),
     )
     assert days[2].expected_minutes == 240  # sábado 03/10
     assert days[3].expected_minutes == 0  # domingo
@@ -93,3 +95,23 @@ def test_national_holidays():
     assert days[date(2026, 2, 17)] == "Carnaval (terça-feira)"
     assert days[date(2026, 6, 4)] == "Corpus Christi"
     assert len(national_holidays(2026)) == 10
+
+
+def test_schedule_change_does_not_affect_earlier_days():
+    six_hours = [360] * 5 + [0, 0]
+    schedules = [(date(2026, 10, 7), MON_FRI_8H), (date(2026, 10, 19), six_hours)]
+    days = month_summary(2026, 10, [], schedules, today=date(2026, 10, 31))
+    assert days[5].expected_minutes == 0  # 06/10: antes da admissão
+    assert days[5].day_off
+    assert days[6].expected_minutes == 480  # 07/10: primeira jornada
+    assert days[15].expected_minutes == 480  # sexta 16/10
+    assert days[18].expected_minutes == 360  # segunda 19/10: nova jornada
+
+
+def test_month_totals():
+    punches = [dt(8, 0, 1), dt(18, 0, 1), dt(8, 0, 2), dt(12, 0, 2), dt(8, 0, 5)]
+    days = month_summary(2026, 10, punches, [(date.min, MON_FRI_8H)], today=date(2026, 10, 6))
+    t = month_totals(days)
+    # 01/10: +2h; 02/10: -4h; 05/10: incompleto, -8h; 06/10: falta, -8h
+    assert (t.overtime, t.missing, t.balance) == (120, 20 * 60, -18 * 60)
+    assert (t.absences, t.incomplete) == (1, 1)

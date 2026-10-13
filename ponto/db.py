@@ -8,9 +8,8 @@ CREATE TABLE IF NOT EXISTS employees (
     code TEXT NOT NULL UNIQUE,          -- matrícula
     name TEXT NOT NULL,
     pin_hash TEXT NOT NULL,
-    daily_minutes INTEGER NOT NULL DEFAULT 480,  -- obsoleto, substituído por schedule
-    -- Minutos esperados de segunda a domingo, separados por vírgula.
-    schedule TEXT NOT NULL DEFAULT '480,480,480,480,480,0,0',
+    daily_minutes INTEGER NOT NULL DEFAULT 480,  -- obsoleto, ver tabela schedules
+    schedule TEXT NOT NULL DEFAULT '480,480,480,480,480,0,0',  -- obsoleto
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -26,6 +25,18 @@ CREATE TABLE IF NOT EXISTS punches (
     note TEXT,
     ip TEXT,
     created_at TEXT NOT NULL
+);
+
+-- Histórico de jornadas. Cada linha vale de start_day até a véspera da
+-- próxima linha do mesmo funcionário; assim, mudar a jornada não altera
+-- o cálculo de dias anteriores. `schedule` tem os minutos esperados de
+-- segunda a domingo, separados por vírgula.
+CREATE TABLE IF NOT EXISTS schedules (
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    start_day TEXT NOT NULL,            -- AAAA-MM-DD
+    schedule TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (employee_id, start_day)
 );
 
 CREATE TABLE IF NOT EXISTS holidays (
@@ -67,6 +78,14 @@ def init_db():
     db = get_db()
     _migrate(db)
     db.executescript(SCHEMA)
+    # Funcionários de versões anteriores ainda sem histórico: a jornada
+    # cadastrada passa a valer desde o dia do cadastro.
+    db.execute(
+        "INSERT INTO schedules (employee_id, start_day, schedule, created_at)"
+        " SELECT id, substr(created_at, 1, 10), schedule, created_at FROM employees"
+        " WHERE id NOT IN (SELECT employee_id FROM schedules)"
+    )
+    db.commit()
 
 
 def _migrate(db):

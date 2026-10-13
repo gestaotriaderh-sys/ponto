@@ -30,6 +30,7 @@ class DaySummary:
     expected_minutes: int = 0
     incomplete: bool = False
     holiday: str | None = None
+    day_off: bool = False  # folga na escala, feriado ou antes da admissão
 
     @property
     def balance_minutes(self):
@@ -45,11 +46,26 @@ def worked_minutes(punches):
     return total, len(punches) % 2 == 1
 
 
-def month_summary(year, month, punches, schedule, holidays=None, today=None):
+def schedule_for(schedules, day):
+    """Jornada vigente em `day`.
+
+    `schedules` é uma lista de (data de início, jornada) ordenada por data.
+    Retorna None antes da primeira jornada (funcionário ainda não admitido).
+    """
+    current = None
+    for start, schedule in schedules:
+        if start > day:
+            break
+        current = schedule
+    return current
+
+
+def month_summary(year, month, punches, schedules, holidays=None, today=None):
     """Resumo diário do mês.
 
-    `punches` é uma lista de datetime do funcionário no mês. `schedule` tem
-    os minutos esperados de segunda (índice 0) a domingo (índice 6).
+    `punches` é uma lista de datetime do funcionário no mês. `schedules` é
+    o histórico de jornadas (ver `schedule_for`); cada jornada tem os
+    minutos esperados de segunda (índice 0) a domingo (índice 6).
     `holidays` mapeia date -> nome do feriado; feriados não têm jornada
     esperada. Dias futuros não contam como falta.
     """
@@ -65,9 +81,46 @@ def month_summary(year, month, punches, schedule, holidays=None, today=None):
         day_punches = sorted(by_day.get(day, []))
         minutes, incomplete = worked_minutes(day_punches)
         holiday = holidays.get(day)
-        expected = schedule[day.weekday()] if day <= today and not holiday else 0
-        days.append(DaySummary(day, day_punches, minutes, expected, incomplete, holiday))
+        schedule = schedule_for(schedules, day)
+        scheduled = schedule[day.weekday()] if schedule else 0
+        expected = scheduled if day <= today and not holiday else 0
+        days.append(
+            DaySummary(
+                day, day_punches, minutes, expected, incomplete, holiday,
+                day_off=bool(holiday or not scheduled),
+            )
+        )
     return days
+
+
+@dataclass
+class MonthTotals:
+    worked: int = 0
+    expected: int = 0
+    overtime: int = 0  # soma dos saldos positivos dos dias
+    missing: int = 0  # soma dos saldos negativos dos dias (valor positivo)
+    absences: int = 0  # dias com jornada esperada e nenhuma marcação
+    incomplete: int = 0  # dias com marcação faltando
+
+    @property
+    def balance(self):
+        return self.worked - self.expected
+
+
+def month_totals(days):
+    t = MonthTotals()
+    for d in days:
+        t.worked += d.worked_minutes
+        t.expected += d.expected_minutes
+        if d.balance_minutes > 0:
+            t.overtime += d.balance_minutes
+        else:
+            t.missing -= d.balance_minutes
+        if d.expected_minutes and not d.punches:
+            t.absences += 1
+        if d.incomplete:
+            t.incomplete += 1
+    return t
 
 
 def parse_schedule(value):

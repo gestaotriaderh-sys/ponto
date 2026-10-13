@@ -24,9 +24,11 @@ from ..calc import (
     describe_schedule,
     fmt_minutes,
     month_summary,
+    month_totals,
     parse_hours,
     parse_schedule,
     parse_ts,
+    schedule_for,
 )
 from ..clock import now
 from ..db import get_db
@@ -108,7 +110,7 @@ def employees():
         elif db.execute("SELECT 1 FROM employees WHERE code = ?", (code,)).fetchone():
             flash(f"Já existe um funcionário com a matrícula {code}.", "error")
         else:
-            db.execute(
+            cur = db.execute(
                 "INSERT INTO employees (code, name, pin_hash, schedule, created_at)"
                 " VALUES (?, ?, ?, ?, ?)",
                 (
@@ -119,18 +121,39 @@ def employees():
                     now().isoformat(),
                 ),
             )
+            _save_schedule(cur.lastrowid, now().date(), schedule)
             db.commit()
             flash(f"Funcionário {name} cadastrado.", "ok")
         return redirect(url_for("admin.employees"))
 
     rows = db.execute("SELECT * FROM employees ORDER BY active DESC, name").fetchall()
+    today = now().date()
     employees = [
-        dict(e, schedule_text=describe_schedule(parse_schedule(e["schedule"]))) for e in rows
+        dict(e, schedule_text=describe_schedule(schedule_for(_schedules(e["id"]), today) or [0] * 7))
+        for e in rows
     ]
     return render_template(
         "admin/employees.html",
         employees=employees,
         schedule_rows=_schedule_rows(DEFAULT_SCHEDULE),
+    )
+
+
+def _schedules(emp_id):
+    """Histórico de jornadas do funcionário: [(data de início, jornada)]."""
+    return [
+        (date.fromisoformat(r["start_day"]), parse_schedule(r["schedule"]))
+        for r in get_db().execute(
+            "SELECT * FROM schedules WHERE employee_id = ? ORDER BY start_day", (emp_id,)
+        )
+    ]
+
+
+def _save_schedule(emp_id, start_day, schedule):
+    get_db().execute(
+        "INSERT OR REPLACE INTO schedules (employee_id, start_day, schedule, created_at)"
+        " VALUES (?, ?, ?, ?)",
+        (emp_id, start_day.isoformat(), ",".join(map(str, schedule)), now().isoformat()),
     )
 
 
@@ -140,26 +163,72 @@ def edit_employee(emp_id):
     emp = _get_employee(emp_id)
     if emp is None:
         return redirect(url_for("admin.employees"))
+    today = now().date()
+    history = _schedules(emp_id)
+
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         schedule = _schedule_from_form()
+        try:
+            start_day = date.fromisoformat(request.form.get("start_day", ""))
+        except ValueError:
+            start_day = None
         if not name:
             flash("Informe o nome.", "error")
-        elif schedule is not None:
-            db = get_db()
-            db.execute(
-                "UPDATE employees SET name = ?, schedule = ? WHERE id = ?",
-                (name, ",".join(map(str, schedule)), emp_id),
+        elif schedule is None:
+            pass
+        elif start_day is None:
+            flash("Informe a partir de quando vale a nova jornada.", "error")
+        elif start_day < today:
+            flash(
+                "A nova jornada não pode começar numa data passada; "
+                "os dias já registrados mantêm a jornada da época.",
+                "error",
             )
+        else:
+            db = get_db()
+            db.execute("UPDATE employees SET name = ? WHERE id = ?", (name, emp_id))
+            if schedule != schedule_for(history, start_day):
+                _save_schedule(emp_id, start_day, schedule)
+                flash(
+                    f"Cadastro de {name} atualizado. A nova jornada vale a partir de "
+                    f"{start_day:%d/%m/%Y}.",
+                    "ok",
+                )
+            else:
+                flash(f"Cadastro de {name} atualizado.", "ok")
             db.commit()
-            flash(f"Cadastro de {name} atualizado.", "ok")
-            return redirect(url_for("admin.employees"))
+            return redirect(url_for("admin.edit_employee", emp_id=emp_id))
         return redirect(url_for("admin.edit_employee", emp_id=emp_id))
+
+    current = schedule_for(history, today) or DEFAULT_SCHEDULE
     return render_template(
         "admin/edit_employee.html",
         emp=emp,
-        schedule_rows=_schedule_rows(parse_schedule(emp["schedule"])),
+        today=today,
+        schedule_rows=_schedule_rows(current),
+        history=[
+            (start, describe_schedule(sched), start > today)
+            for start, sched in reversed(history)
+        ],
     )
+
+
+@bp.post("/funcionario/<int:emp_id>/jornada/<start_day>/excluir")
+@login_required
+def delete_schedule(emp_id, start_day):
+    """Cancela uma mudança de jornada que ainda não entrou em vigor."""
+    db = get_db()
+    cur = db.execute(
+        "DELETE FROM schedules WHERE employee_id = ? AND start_day = ? AND start_day > ?",
+        (emp_id, start_day, now().date().isoformat()),
+    )
+    db.commit()
+    if cur.rowcount:
+        flash("Mudança de jornada cancelada.", "ok")
+    else:
+        flash("Só é possível cancelar jornadas que ainda não começaram.", "error")
+    return redirect(url_for("admin.edit_employee", emp_id=emp_id))
 
 
 @bp.post("/funcionario/<int:emp_id>/ativo")
@@ -214,7 +283,7 @@ def _load_month(emp, year, month):
         year,
         month,
         [parse_ts(r["ts"]) for r in rows],
-        parse_schedule(emp["schedule"]),
+        _schedules(emp["id"]),
         holidays,
         now().date(),
     )
@@ -239,11 +308,11 @@ def report(emp_id):
         emp=emp,
         days=days,
         manual=manual,
-        schedule=parse_schedule(emp["schedule"]),
-        schedule_text=describe_schedule(parse_schedule(emp["schedule"])),
+        schedule_text=describe_schedule(
+            schedule_for(_schedules(emp["id"]), now().date()) or [0] * 7
+        ),
         month=f"{year:04d}-{month:02d}",
-        total_worked=sum(d.worked_minutes for d in days),
-        total_expected=sum(d.expected_minutes for d in days),
+        totals=month_totals(days),
     )
 
 
@@ -280,7 +349,7 @@ def report_csv(emp_id):
     filename = f"espelho_{emp['code']}_{year:04d}-{month:02d}.csv"
     # BOM para o Excel reconhecer UTF-8
     return Response(
-        "﻿" + out.getvalue(),
+        "\ufeff" + out.getvalue(),
         mimetype="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -373,3 +442,57 @@ def delete_holiday(day):
     db.commit()
     flash("Feriado removido.", "ok")
     return redirect(url_for("admin.holidays", ano=day[:4]))
+
+
+def _summary_rows(year, month):
+    """Totais do mês de cada funcionário ativo ou com marcações no mês."""
+    start = f"{year:04d}-{month:02d}-01"
+    end = f"{year + (month == 12):04d}-{month % 12 + 1:02d}-01"
+    emps = get_db().execute(
+        "SELECT * FROM employees WHERE active = 1 OR id IN"
+        " (SELECT employee_id FROM punches WHERE ts >= ? AND ts < ?) ORDER BY name",
+        (start, end),
+    ).fetchall()
+    return [(emp, month_totals(_load_month(emp, year, month)[1])) for emp in emps]
+
+
+@bp.get("/relatorio")
+@login_required
+def summary():
+    year, month = _month_param()
+    rows = _summary_rows(year, month)
+    return render_template(
+        "admin/summary.html",
+        rows=rows,
+        month=f"{year:04d}-{month:02d}",
+        month_label=f"{month:02d}/{year:04d}",
+    )
+
+
+@bp.get("/relatorio.csv")
+@login_required
+def summary_csv():
+    year, month = _month_param()
+    out = io.StringIO()
+    w = csv.writer(out, delimiter=";")
+    w.writerow(
+        [
+            "Matrícula", "Nome", "Trabalhado", "Esperado", "Horas extras",
+            "Horas faltando", "Saldo", "Faltas (dias)", "Dias com marcação faltando",
+        ]
+    )
+    for emp, t in _summary_rows(year, month):
+        w.writerow(
+            [
+                emp["code"], emp["name"], fmt_minutes(t.worked), fmt_minutes(t.expected),
+                fmt_minutes(t.overtime), fmt_minutes(t.missing), fmt_minutes(t.balance),
+                t.absences, t.incomplete,
+            ]
+        )
+    return Response(
+        "\ufeff" + out.getvalue(),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="relatorio_{year:04d}-{month:02d}.csv"'
+        },
+    )

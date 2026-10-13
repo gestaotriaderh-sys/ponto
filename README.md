@@ -20,6 +20,10 @@ precisa de servidor de banco de dados.
   - cadastro de feriados, com inclusão automática dos feriados nacionais
     (e, opcionalmente, Carnaval e Corpus Christi);
   - ativar/desativar funcionário e trocar PIN;
+  - histórico de jornadas: ao mudar a jornada, escolhe-se a data a partir
+    da qual ela vale; os dias anteriores mantêm a jornada da época;
+  - relatório mensal de todos os funcionários com horas trabalhadas,
+    esperadas, horas extras, horas faltando, saldo e faltas (com CSV);
   - espelho de ponto mensal com horas trabalhadas, esperadas e saldo por dia;
   - inclusão de marcação esquecida com justificativa;
   - exportação do espelho em CSV (abre no Excel).
@@ -60,11 +64,15 @@ pytest
 
 - As marcações do dia são pareadas em ordem: (entrada, saída), (entrada, saída)...
 - Número ímpar de marcações → dia sinalizado como "marcação faltando".
-- A jornada esperada de cada dia vem da escala semanal do funcionário
-  (dias sem horas são folga). Dias futuros não contam.
+- A jornada esperada de cada dia vem da escala semanal que estava em vigor
+  naquele dia (dias sem horas são folga). Dias anteriores ao cadastro do
+  funcionário e dias futuros não contam.
 - Em feriados a jornada esperada é zero; horas trabalhadas no feriado
   entram como saldo positivo.
-- Alterar a escala de um funcionário recalcula também os meses anteriores.
+- Mudanças de jornada só valem da data escolhida em diante (hoje ou uma
+  data futura); mudanças programadas podem ser canceladas antes de começar.
+- Horas extras = soma dos saldos positivos de cada dia; horas faltando =
+  soma dos saldos negativos. O saldo do mês é a diferença entre os dois.
 
 ## Aviso legal
 
@@ -77,8 +85,8 @@ trabalhista antes de usá-lo como controle oficial.
 
 ## Próximos passos sugeridos
 
-- Escalas que não se repetem toda semana (ex.: 12x36) e histórico de
-  alterações de jornada.
+- Escalas que não se repetem toda semana (ex.: 12x36).
+- Banco de horas acumulado entre meses.
 - Banco de horas acumulado e cálculo de horas extras / adicional noturno.
 - Relatório em PDF com assinatura do funcionário.
 - Vários usuários administradores com log de auditoria.

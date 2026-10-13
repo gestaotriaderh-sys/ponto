@@ -2,9 +2,9 @@
         --border: #d9dde3; --ok: #1a7f37; --err: #cf222e; }
 * { box-sizing: border-box; }
 body { margin: 0; font: 16px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px;
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; align-items: center; padding: 12px 20px;
          background: var(--card); border-bottom: 1px solid var(--border); }
-header nav { display: flex; gap: 16px; align-items: center; }
+header nav { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 .brand { font-weight: 700; font-size: 1.2rem; text-decoration: none; color: var(--fg); }
 main { max-width: 1000px; margin: 0 auto; padding: 20px 16px; }
 a { color: var(--accent); }
@@ -49,3 +49,9 @@ fieldset.schedule legend { padding: 0 6px; font-size: .9rem; }
 fieldset.schedule .hint { font-size: .8rem; }
 label.check { display: flex; gap: 8px; align-items: center; color: var(--fg); }
 label.check input { width: auto; margin: 0; }
+.tag.warn { background: #fff8c5; color: #7d4e00; }
+.table-wrap { overflow-x: auto; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+.stats div { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.stats span { display: block; color: var(--muted); font-size: .85rem; }
+.stats strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }

@@ -12,6 +12,7 @@
     <nav>
       {% if session.admin %}
         <a href="{{ url_for('admin.employees') }}">Funcionários</a>
+        <a href="{{ url_for('admin.summary') }}">Relatório</a>
         <a href="{{ url_for('admin.holidays') }}">Feriados</a>
         <form method="post" action="{{ url_for('admin.logout') }}" class="inline">
           <button class="link">Sair</button>

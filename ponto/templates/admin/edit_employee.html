@@ -6,9 +6,36 @@
   <p class="hint">Matrícula {{ emp.code }}</p>
   <form method="post" class="grid">
     <label>Nome <input name="name" value="{{ emp.name }}" required></label>
+    <label>Nova jornada vale a partir de
+      <input type="date" name="start_day" value="{{ today.isoformat() }}" min="{{ today.isoformat() }}" required>
+    </label>
     {% include "admin/_schedule.html" %}
     <button type="submit">Salvar</button>
   </form>
+  <p class="hint">Os dias anteriores à data escolhida continuam calculados com a jornada que valia na época.</p>
 </section>
-<p class="hint">A nova jornada vale para todo o espelho de ponto, inclusive meses anteriores.</p>
+
+<h2>Histórico de jornadas</h2>
+<table>
+  <thead><tr><th>A partir de</th><th>Jornada</th><th></th></tr></thead>
+  <tbody>
+  {% for start, text, future in history %}
+    <tr>
+      <td>{{ start.strftime('%d/%m/%Y') }}</td>
+      <td>{{ text }}</td>
+      <td>
+        {% if future %}
+          <span class="tag">programada</span>
+          <form method="post" class="inline"
+                action="{{ url_for('admin.delete_schedule', emp_id=emp.id, start_day=start.isoformat()) }}">
+            <button class="link">Cancelar</button>
+          </form>
+        {% elif loop.first or (loop.previtem and loop.previtem[2]) %}
+          <span class="tag">em vigor</span>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
 {% endblock %}
