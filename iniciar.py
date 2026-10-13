@@ -1,4 +1,4 @@
-"""Inicia o sistema de ponto.
+"""Inicia o sistema de ponto e abre a tela no navegador padrão.
 
 Na primeira execução pede a senha do administrador e grava
 instance/config.py com a senha e uma chave secreta aleatória.
@@ -8,6 +8,9 @@ import getpass
 import os
 import secrets
 import socket
+import threading
+import time
+import webbrowser
 
 from ponto import create_app
 
@@ -45,18 +48,45 @@ def ip_da_rede():
         return None
 
 
+def porta_em_uso():
+    """True se já há algo respondendo na porta (ex.: o sistema já aberto)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", PORTA)) == 0
+
+
+def abrir_navegador_quando_pronto(url, espera_max=30):
+    """Espera o servidor começar a responder e abre `url` no navegador padrão."""
+    def tarefa():
+        limite = time.monotonic() + espera_max
+        while time.monotonic() < limite:
+            if porta_em_uso():
+                webbrowser.open(url)
+                return
+            time.sleep(0.3)
+
+    threading.Thread(target=tarefa, daemon=True).start()
+
+
 def main():
+    url = f"http://localhost:{PORTA}"
+    if porta_em_uso():
+        print("O sistema de ponto já está aberto em outra janela.")
+        print(f"Abrindo {url} no navegador...")
+        webbrowser.open(url)
+        return
     if not os.path.exists(CONFIG):
         configurar()
     app = create_app()
     print("=" * 60)
-    print("Sistema de ponto no ar!")
-    print(f"  Neste computador:      http://localhost:{PORTA}")
+    print("Sistema de ponto no ar! O navegador será aberto automaticamente.")
+    print(f"  Neste computador:      {url}")
     ip = ip_da_rede()
     if ip:
         print(f"  Em outros aparelhos:   http://{ip}:{PORTA}")
     print("Deixe esta janela aberta. Para encerrar, feche-a ou tecle Ctrl+C.")
     print("=" * 60)
+    abrir_navegador_quando_pronto(url)
     app.run(host="0.0.0.0", port=PORTA)
 
 

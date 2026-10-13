@@ -46,9 +46,10 @@ precisa de servidor de banco de dados.
    - **Mac/Linux:** `iniciar.sh` (ou rode `./iniciar.sh` no Terminal)
 
 Na primeira vez o programa instala o que precisa e pede a senha da área
-administrativa. Depois mostra os endereços para abrir no navegador, por
-exemplo `http://localhost:5000`. Deixe a janela aberta enquanto o sistema
-estiver em uso.
+administrativa. Em seguida a tela do sistema abre sozinha no navegador
+padrão (`http://localhost:5000`). Deixe a janela preta aberta enquanto o
+sistema estiver em uso. Se o programa já estiver aberto, clicar de novo em
+`iniciar.bat` só abre o navegador, sem iniciar uma segunda cópia.
 
 A senha fica em `instance/config.py`. Para trocá-la, apague esse arquivo e
 inicie o programa de novo.
