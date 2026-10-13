@@ -21,6 +21,9 @@ def create_app(test_config=None):
     )
     if test_config:
         app.config.update(test_config)
+    else:
+        # Senha e chave gravadas pelo iniciar.py na primeira execução.
+        app.config.from_pyfile("config.py", silent=True)
 
     os.makedirs(app.instance_path, exist_ok=True)
 

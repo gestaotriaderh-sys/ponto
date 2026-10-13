@@ -23,26 +23,23 @@ precisa de servidor de banco de dados.
 
 ## Como rodar
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate          # no Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+1. Instale o Python 3 (https://www.python.org/downloads/). No Windows,
+   marque **"Add Python to PATH"** na instalação.
+2. Baixe esta pasta do projeto.
+3. Dê dois cliques em:
+   - **Windows:** `iniciar.bat`
+   - **Mac/Linux:** `iniciar.sh` (ou rode `./iniciar.sh` no Terminal)
 
-export PONTO_ADMIN_PASSWORD='uma-senha-forte'
-export PONTO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-flask --app app run --host 0.0.0.0 --port 5000
-```
+Na primeira vez o programa instala o que precisa e pede a senha da área
+administrativa. Depois mostra os endereços para abrir no navegador, por
+exemplo `http://localhost:5000`. Deixe a janela aberta enquanto o sistema
+estiver em uso.
 
-Acesse `http://<ip-da-maquina>:5000` no computador/tablet que ficará na
-entrada da empresa. A área administrativa fica em `/admin`.
+A senha fica em `instance/config.py`. Para trocá-la, apague esse arquivo e
+inicie o programa de novo.
 
-Configurações por variável de ambiente:
-
-| Variável | Padrão | Descrição |
-|---|---|---|
-| `PONTO_ADMIN_PASSWORD` | `admin` | Senha da área administrativa (**troque!**) |
-| `PONTO_SECRET_KEY` | valor de desenvolvimento | Chave das sessões (**troque!**) |
-| `PONTO_TIMEZONE` | `America/Sao_Paulo` | Fuso horário das marcações |
+Opcionalmente, o fuso horário pode ser alterado pela variável de ambiente
+`PONTO_TIMEZONE` (padrão `America/Sao_Paulo`).
 
 O banco fica em `instance/ponto.sqlite3`. Faça backup desse arquivo.
 
