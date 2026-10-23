@@ -1,0 +1,5 @@
+{# Dados pessoais. Espera `emp` (opcional) e `today`. #}
+<label>Nome completo <input name="name" value="{{ emp.name if emp else '' }}" required></label>
+<label>CPF <input name="cpf" value="{{ emp.cpf | cpf if emp and emp.cpf else '' }}" placeholder="000.000.000-00" inputmode="numeric" maxlength="14"></label>
+<label>Data de nascimento <input type="date" name="birth_date" value="{{ emp.birth_date if emp and emp.birth_date else '' }}"></label>
+<label>Data de admissão <input type="date" name="admission_date" value="{{ emp.admission_date if emp and emp.admission_date else today.isoformat() }}" required></label>

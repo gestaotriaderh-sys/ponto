@@ -3,13 +3,33 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from ponto.calc import fmt_minutes, parse_hours
 
 WEEKDAYS_8H = ["8", "8", "8", "8", "8", "", ""]
 
 
-def add_employee(admin, code="001", pin="1234", hours=WEEKDAYS_8H):
-    data = {"code": code, "name": "Maria Silva", "pin": pin}
-    data.update({f"dia_{i}": h for i, h in enumerate(hours)})
+def week_fields(hours=WEEKDAYS_8H, with_break=False):
+    """Campos de horário que dão as horas pedidas por dia (entrada às 08:00)."""
+    data = {}
+    for i, h in enumerate(hours):
+        if not h:
+            continue
+        minutes = parse_hours(h)
+        data[f"d{i}_entrada"] = "08:00"
+        if with_break:
+            data[f"d{i}_saida_intervalo"] = "12:00"
+            data[f"d{i}_retorno_intervalo"] = "13:00"
+            minutes += 60
+        data[f"d{i}_saida"] = fmt_minutes(8 * 60 + minutes)
+    return data
+
+
+def add_employee(admin, code="001", pin="1234", hours=WEEKDAYS_8H, name="Maria Silva",
+                 with_break=False, admission=None, **extra):
+    if admission is None:  # padrão: admitido "hoje" (relógio de teste)
+        admission = admin.application.config["NOW"]().date().isoformat()
+    data = {"code": code, "name": name, "pin": pin, "admission_date": admission, **extra}
+    data.update(week_fields(hours, with_break))
     return admin.post("/admin/", data=data, follow_redirects=True)
 
 
@@ -80,7 +100,8 @@ def test_custom_schedule(admin, clock):
     clock.value = datetime(2026, 10, 1, 8, 0)
     add_employee(admin, hours=["", "6:30", "8", "8", "8", "4", ""])
     body = admin.get("/admin/").get_data(as_text=True)
-    assert "ter 06:30 · qua–sex 08:00 · sáb 04:00" in body
+    assert ("ter 08:00–14:30 (sem intervalo) · qua–sex 08:00–16:00 (sem intervalo)"
+            " · sáb 08:00–12:00 (sem intervalo)") in body
 
     clock.value = datetime(2026, 10, 31, 12, 0)  # sábado
     csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
@@ -89,21 +110,20 @@ def test_custom_schedule(admin, clock):
     assert "10/10/2026;;00:00;04:00;-04:00;" in csv  # sábado
 
 
-def test_edit_schedule_rejects_invalid_hours(admin):
+def test_schedule_validation(admin, clock):
     add_employee(admin)
-    data = {
-        "name": "Maria S.",
-        "start_day": "2026-10-13",
-        **{f"dia_{i}": "abc" if i == 0 else "" for i in range(7)},
-    }
-    r = admin.post("/admin/funcionario/1/editar", data=data, follow_redirects=True)
-    assert "Horas inválidas" in r.get_data(as_text=True)
-    data["dia_0"] = "7,5"
-    r = admin.post("/admin/funcionario/1/editar", data=data, follow_redirects=True)
-    assert "seg 07:30" in r.get_data(as_text=True)
-    data["start_day"] = "2026-10-12"
-    r = admin.post("/admin/funcionario/1/editar", data=data, follow_redirects=True)
-    assert "não pode começar numa data passada" in r.get_data(as_text=True)
+    data = {"start_day": "2026-10-13", "d0_entrada": "08:00"}
+    r = admin.post("/admin/funcionario/1/jornada", data=data, follow_redirects=True)
+    assert "Segunda: informe a entrada e a saída" in r.get_data(as_text=True)
+    data["d0_saida"] = "07:00"
+    r = admin.post("/admin/funcionario/1/jornada", data=data, follow_redirects=True)
+    assert "devem estar em ordem" in r.get_data(as_text=True)
+    data.update({"d0_saida": "17:00", "d0_saida_intervalo": "12:00"})
+    r = admin.post("/admin/funcionario/1/jornada", data=data, follow_redirects=True)
+    assert "saída e o retorno do intervalo" in r.get_data(as_text=True)
+    data["d0_retorno_intervalo"] = "13:30"
+    r = admin.post("/admin/funcionario/1/jornada", data=data, follow_redirects=True)
+    assert "seg 08:00–12:00 / 13:30–17:00" in r.get_data(as_text=True)
 
 
 def test_holidays(admin, clock):
@@ -144,12 +164,12 @@ def test_migrates_old_database(tmp_path, clock):
     assert con.execute("SELECT start_day, schedule FROM schedules").fetchall() == [
         ("2026-01-01", "360,360,360,360,360,0,0")
     ]
+    assert con.execute("SELECT admission_date FROM employees").fetchone()[0] == "2026-01-01"
 
 
 def edit_schedule(admin, start_day, hours):
-    data = {"name": "Maria Silva", "start_day": start_day}
-    data.update({f"dia_{i}": h for i, h in enumerate(hours)})
-    return admin.post("/admin/funcionario/1/editar", data=data, follow_redirects=True)
+    data = {"start_day": start_day, **week_fields(hours)}
+    return admin.post("/admin/funcionario/1/jornada", data=data, follow_redirects=True)
 
 
 def test_schedule_change_applies_only_from_start_day(admin, clock):
@@ -157,7 +177,7 @@ def test_schedule_change_applies_only_from_start_day(admin, clock):
     add_employee(admin)  # seg–sex 8h desde 01/10
     clock.value = datetime(2026, 10, 14, 9, 0)
     body = edit_schedule(admin, "2026-10-14", ["6"] * 5 + ["", ""]).get_data(as_text=True)
-    assert "vale a partir de 14/10/2026" in body
+    assert "Vale a partir de 14/10/2026" in body
 
     clock.value = datetime(2026, 10, 31, 12, 0)
     csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
@@ -165,25 +185,31 @@ def test_schedule_change_applies_only_from_start_day(admin, clock):
     assert "14/10/2026;;00:00;06:00;-06:00;" in csv  # jornada nova
 
 
-def test_future_schedule_change_can_be_cancelled(admin, clock):
+def test_schedule_history_and_removal(admin, clock):
     add_employee(admin)
     edit_schedule(admin, "2026-11-01", ["4"] * 5 + ["", ""])
     body = admin.get("/admin/funcionario/1/editar").get_data(as_text=True)
-    assert "programada" in body and "01/11/2026" in body
-    assert "seg–sex 08:00" in admin.get("/admin/").get_data(as_text=True)  # ainda vale a atual
+    assert "programado" in body and "01/11/2026" in body
+    assert "seg–sex 08:00–16:00" in admin.get("/admin/").get_data(as_text=True)  # vale a atual
 
     r = admin.post("/admin/funcionario/1/jornada/2026-11-01/excluir", follow_redirects=True)
-    assert "cancelada" in r.get_data(as_text=True)
-    # jornada já em vigor não pode ser apagada
+    assert "removida do histórico" in r.get_data(as_text=True)
     r = admin.post("/admin/funcionario/1/jornada/2026-10-13/excluir", follow_redirects=True)
-    assert "ainda não começaram" in r.get_data(as_text=True)
+    assert "primeira jornada não pode ser removida" in r.get_data(as_text=True)
+
+
+def test_schedule_change_on_past_date_recalculates_from_that_date(admin, clock):
+    add_employee(admin, admission="2026-10-01")
+    edit_schedule(admin, "2026-10-12", ["6"] * 5 + ["", ""])
+    csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
+    assert "09/10/2026;;00:00;08:00;-08:00;" in csv
+    assert "12/10/2026;;00:00;06:00;-06:00;" in csv
 
 
 def test_summary_report(admin, clock):
     clock.value = datetime(2026, 10, 1, 7, 0)
     add_employee(admin, code="001")
-    admin.post("/admin/", data={"code": "002", "name": "João Souza", "pin": "1234",
-                                **{f"dia_{i}": h for i, h in enumerate(WEEKDAYS_8H)}})
+    add_employee(admin, code="002", name="João Souza")
     for ts in ["08:00", "18:00"]:  # Maria: 10h na quinta 01/10 -> 2h extras
         h, m = map(int, ts.split(":"))
         clock.value = datetime(2026, 10, 1, h, m)
@@ -199,13 +225,13 @@ def test_summary_report(admin, clock):
     csv = admin.get("/admin/relatorio.csv?inicio=2026-10-01&fim=2026-10-01&todos=1")
     csv = csv.get_data(as_text=True)
     assert "Período: 01/10/2026 a 01/10/2026" in csv
-    assert "001;Maria Silva;10:00;08:00;02:00;00:00;02:00;0;0" in csv
-    assert "002;João Souza;00:00;08:00;00:00;08:00;-08:00;1;0" in csv
+    assert "001;Maria Silva;10:00;08:00;02:00;00:00;02:00;0;0;0;0" in csv
+    assert "002;João Souza;00:00;08:00;00:00;08:00;-08:00;1;0;0;0" in csv
 
     # Só a Maria, dois dias.
     csv = admin.get("/admin/relatorio.csv?inicio=2026-10-01&fim=2026-10-02&func=1")
     csv = csv.get_data(as_text=True)
-    assert "001;Maria Silva;10:00;16:00;02:00;08:00;-06:00;1;0" in csv
+    assert "001;Maria Silva;10:00;16:00;02:00;08:00;-06:00;1;0;0;0" in csv
     assert "João" not in csv
 
 
@@ -220,10 +246,8 @@ def test_summary_report_validation(admin, clock):
 
 
 def test_punch_labels_with_and_without_break(admin, clock):
-    add_employee(admin, code="001")  # sem o campo has_break -> sem intervalo
-    data = {"code": "002", "name": "Com Intervalo", "pin": "1234", "has_break": "1"}
-    data.update({f"dia_{i}": h for i, h in enumerate(WEEKDAYS_8H)})
-    admin.post("/admin/", data=data)
+    add_employee(admin, code="001")  # horário sem intervalo
+    add_employee(admin, code="002", name="Com Intervalo", with_break=True)
     labels = {"001": [], "002": []}
     for i in range(4):
         clock.value = datetime(2026, 10, 13, 8 + i, 0)
@@ -309,3 +333,122 @@ def test_appearance(app, admin):
     assert admin.get("/logo").status_code == 404
     admin.post("/admin/aparencia", data={"restore": "1"})
     assert "--brand: #1f6feb" in admin.get("/").get_data(as_text=True)
+
+
+def test_title_and_health(client):
+    assert "<title>Ponto - Tríade RH</title>" in client.get("/").get_data(as_text=True)
+    assert client.get("/saude").get_json() == {"app": "ponto-triade-rh"}
+
+
+def test_personal_data(admin, clock):
+    r = add_employee(admin, cpf="111.111.111-11")
+    assert "CPF inválido" in r.get_data(as_text=True)
+    r = add_employee(admin, cpf="529.982.247-25", birth_date="1990-05-20")
+    body = r.get_data(as_text=True)
+    assert "Maria Silva cadastrado" in body and "529.982.247-25" in body
+    r = add_employee(admin, code="002", name="Outra", cpf="52998224725")
+    assert "já está cadastrado para Maria Silva" in r.get_data(as_text=True)
+    r = admin.post("/admin/funcionario/1/editar", data={
+        "name": "Maria S.", "cpf": "52998224725", "birth_date": "1990-05-20",
+        "admission_date": "2026-10-05"}, follow_redirects=True)
+    assert "Dados de Maria S. atualizados" in r.get_data(as_text=True)
+
+
+def test_no_expected_hours_before_admission(admin, clock):
+    add_employee(admin, admission="2026-10-07")
+    csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
+    assert "06/10/2026;;00:00;00:00;00:00;" in csv
+    assert "07/10/2026;;00:00;08:00;-08:00;" in csv
+    # Admissão corrigida para antes: a primeira jornada passa a valer desde ela.
+    admin.post("/admin/funcionario/1/editar", data={
+        "name": "Maria Silva", "admission_date": "2026-10-05"})
+    csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
+    assert "05/10/2026;;00:00;08:00;-08:00;" in csv
+
+
+def test_special_schedule_for_one_day(admin, clock):
+    add_employee(admin, admission="2026-10-01", with_break=True)
+    r = admin.post("/admin/funcionario/1/horario-especial", data={
+        "day": "2026-10-09", "note": "saída antecipada", "o_entrada": "08:00",
+        "o_saida": "12:00", "voltar": "dia"}, follow_redirects=True)
+    body = r.get_data(as_text=True)
+    assert "08:00–12:00 (sem intervalo)" in body and "horário especial: saída antecipada" in body
+    admin.post("/admin/funcionario/1/horario-especial", data={
+        "day": "2026-10-08", "note": "folga combinada", "folga": "1"})
+    csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
+    assert "07/10/2026;;00:00;08:00;-08:00;" in csv
+    assert "08/10/2026;;00:00;00:00;00:00;Horário especial" in csv
+    assert "09/10/2026;;00:00;04:00;-04:00;Horário especial" in csv
+
+    admin.post("/admin/funcionario/1/horario-especial/2026-10-09/excluir")
+    csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
+    assert "09/10/2026;;00:00;08:00;-08:00;" in csv
+
+    # Sem intervalo no dia especial: a sequência de marcações vira Entrada/Saída.
+    admin.post("/admin/funcionario/1/horario-especial", data={
+        "day": "2026-10-13", "note": "meio período", "o_entrada": "08:00", "o_saida": "12:00"})
+    labels = []
+    for h in (8, 9):
+        clock.value = datetime(2026, 10, 13, h, 0)
+        body = punch(admin).get_data(as_text=True)
+        labels.append(body.split('<p class="big">')[1].split(" — ")[0])
+    assert labels == ["Entrada", "Saída"]
+
+
+def test_sick_leave_with_file(app, admin, clock):
+    import io
+
+    add_employee(admin, admission="2026-10-01")
+    pdf = b"%PDF-1.4 atestado"
+    r = admin.post("/admin/atestados", data={
+        "employee_id": "1", "first_day": "2026-10-07", "last_day": "2026-10-08",
+        "note": "CID J11", "file": (io.BytesIO(b"MZ fake"), "atestado.pdf")},
+        content_type="multipart/form-data", follow_redirects=True)
+    assert "deve ser um PDF ou uma imagem" in r.get_data(as_text=True)
+
+    r = admin.post("/admin/atestados", data={
+        "employee_id": "1", "first_day": "2026-10-07", "last_day": "2026-10-08",
+        "note": "CID J11", "file": (io.BytesIO(pdf), "atestado médico.pdf")},
+        content_type="multipart/form-data", follow_redirects=True)
+    body = r.get_data(as_text=True)
+    assert "Atestado de Maria Silva incluído (2 dia(s))" in body and "atestado médico.pdf" in body
+    file_resp = admin.get("/admin/atestados/1/anexo")
+    assert file_resp.data == pdf and file_resp.mimetype == "application/pdf"
+
+    csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
+    assert "07/10/2026;;00:00;00:00;00:00;Atestado" in csv
+    summary = admin.get("/admin/relatorio.csv?inicio=2026-10-01&fim=2026-10-09&todos=1")
+    # 7 dias úteis: 5 de falta, 2 de atestado
+    assert "001;Maria Silva;00:00;40:00;00:00;40:00;-40:00;5;2;0;0" in summary.get_data(as_text=True)
+
+    # Sobreposição com outro afastamento é recusada.
+    r = admin.post("/admin/ferias", data={"employee_id": "1", "first_day": "2026-10-08",
+                                          "last_day": "2026-10-20"}, follow_redirects=True)
+    assert "já tem atestado" in r.get_data(as_text=True)
+
+    # Sem login, o anexo não pode ser baixado.
+    admin.post("/admin/logout")
+    assert admin.get("/admin/atestados/1/anexo").status_code == 302
+
+    # Remover o atestado apaga o arquivo.
+    admin.post("/admin/login", data={"password": "segredo"})
+    import os
+    files = os.listdir(os.path.join(app.instance_path, "anexos"))
+    admin.post("/admin/atestados/1/excluir")
+    remaining = os.listdir(os.path.join(app.instance_path, "anexos"))
+    assert len(files) - len(remaining) == 1
+
+
+def test_vacation(admin, clock):
+    add_employee(admin, admission="2026-10-01")
+    r = admin.post("/admin/ferias", data={"employee_id": "1", "first_day": "2026-10-05",
+                                          "last_day": "2026-10-09"}, follow_redirects=True)
+    body = r.get_data(as_text=True)
+    assert "Período de férias de Maria Silva incluído (5 dia(s))" in body
+    csv = admin.get("/admin/funcionario/1/espelho.csv?mes=2026-10").get_data(as_text=True)
+    assert "05/10/2026;;00:00;00:00;00:00;Férias" in csv
+    summary = admin.get("/admin/relatorio.csv?inicio=2026-10-05&fim=2026-10-11&todos=1")
+    assert "001;Maria Silva;00:00;00:00;00:00;00:00;00:00;0;0;5;0" in summary.get_data(as_text=True)
+    r = admin.post("/admin/ferias", data={"employee_id": "1", "first_day": "2026-10-20",
+                                          "last_day": "2026-10-19"}, follow_redirects=True)
+    assert "não pode ser anterior" in r.get_data(as_text=True)

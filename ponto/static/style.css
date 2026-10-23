@@ -109,3 +109,15 @@ table.punches td { vertical-align: top; }
 .color-field input:not([type=color]) { margin: 0; font-family: monospace; }
 .logo-preview { max-height: 80px; max-width: 240px; border: 1px solid var(--border); border-radius: 6px;
                 padding: 6px; background: var(--header-bg); }
+select { display: block; width: 100%; padding: 10px; font-size: 1rem; border: 1px solid var(--border);
+         border-radius: 6px; margin-top: 4px; background: var(--card); color: var(--fg); }
+.toolbar select { width: auto; }
+fieldset.week { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 0; }
+fieldset.week legend { padding: 0 6px; font-size: .9rem; color: var(--muted); }
+table.week-table { background: none; }
+table.week-table th, table.week-table td { padding: 4px 6px; border: 0; }
+table.week-table input { margin: 0; padding: 6px; min-width: 7.5em; }
+.day-times { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.day-times label { margin: 0; }
+.card table { margin-top: 12px; }
+h3 { margin: 20px 0 4px; font-size: 1rem; }

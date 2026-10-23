@@ -39,7 +39,7 @@
   <thead>
     <tr>
       <th>Funcionário</th><th>Trabalhado</th><th>Esperado</th>
-      <th>Horas extras</th><th>Horas faltando</th><th>Saldo</th><th>Faltas</th><th>Pendências</th>
+      <th>Horas extras</th><th>Horas faltando</th><th>Saldo</th><th>Faltas</th><th>Atestado</th><th>Férias</th><th>Pendências</th>
     </tr>
   </thead>
   <tbody>
@@ -53,10 +53,12 @@
       <td class="{{ 'neg' if t.missing }}">{{ t.missing | hhmm }}</td>
       <td class="{{ 'neg' if t.balance < 0 else 'pos' if t.balance > 0 }}"><strong>{{ t.balance | hhmm }}</strong></td>
       <td>{{ t.absences or '—' }}</td>
+      <td>{{ t.sick_days or '—' }}</td>
+      <td>{{ t.vacation_days or '—' }}</td>
       <td>{% if t.incomplete %}<span class="tag warn">{{ t.incomplete }} dia(s) com marcação faltando</span>{% else %}—{% endif %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="8">Nenhum funcionário.</td></tr>
+    <tr><td colspan="10">Nenhum funcionário.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -66,7 +68,8 @@
   <strong>Horas extras</strong>: soma do tempo trabalhado além da jornada em cada dia.
   <strong>Horas faltando</strong>: soma do tempo que faltou para completar a jornada em cada dia.
   <strong>Saldo</strong>: horas extras menos horas faltando.
-  <strong>Faltas</strong>: dias com jornada e nenhuma marcação.
+  <strong>Faltas</strong>: dias com jornada e nenhuma marcação (sem contar atestados e férias).
+  <strong>Atestado / Férias</strong>: dias de trabalho cobertos.
   O dia de hoje já entra na conta, então durante o expediente ele aparece como horas faltando.
   Clique no nome para ver o espelho de ponto dia a dia.
 </p>

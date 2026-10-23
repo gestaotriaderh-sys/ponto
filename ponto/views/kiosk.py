@@ -17,7 +17,8 @@ from werkzeug.security import check_password_hash
 
 from ..calc import parse_ts, punch_label
 from ..clock import now
-from .. import theme
+from .. import records, theme
+from .. import schedule as sched
 from ..db import VALID_PUNCH, get_db
 
 bp = Blueprint("kiosk", __name__)
@@ -26,6 +27,16 @@ bp = Blueprint("kiosk", __name__)
 @bp.get("/")
 def index():
     return render_template("kiosk.html", now=now())
+
+
+# Identifica este programa para o iniciar.py (que verifica se a porta já
+# está ocupada por ele mesmo ou por outro programa).
+APP_ID = "ponto-triade-rh"
+
+
+@bp.get("/saude")
+def health():
+    return {"app": APP_ID}
 
 
 @bp.get("/logo")
@@ -76,7 +87,12 @@ def punch():
         "receipt.html",
         emp=emp,
         ts=ts,
-        label=punch_label(len(today), bool(emp["has_break"])),
+        label=punch_label(len(today), _has_break_today(emp, ts.date())),
         punch_id=cur.lastrowid,
         today=today + [ts],
     )
+
+
+def _has_break_today(emp, day):
+    times = records.times_on(emp["id"], day)
+    return sched.has_break(times) if times else bool(emp["has_break"])

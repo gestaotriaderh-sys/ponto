@@ -5,18 +5,34 @@ instance/config.py com a senha e uma chave secreta aleatória.
 """
 
 import getpass
+import json
 import os
 import secrets
 import socket
 import threading
 import time
+import urllib.request
 import webbrowser
 
 from ponto import create_app
 
 PASTA = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(PASTA, "instance", "config.py")
-PORTA = 5000
+# Porta própria, diferente da 5000 usada por padrão por outros programas
+# Flask. Pode ser trocada com PORT = 1234 no arquivo instance/config.py.
+PORTA_PADRAO = 8642
+APP_ID = "ponto-triade-rh"  # o mesmo de ponto/views/kiosk.py
+
+
+def ler_porta():
+    config = {}
+    if os.path.exists(CONFIG):
+        with open(CONFIG, encoding="utf-8") as f:
+            exec(f.read(), config)
+    return int(config.get("PORT", PORTA_PADRAO))
+
+
+PORTA = ler_porta()
 
 
 def configurar():
@@ -49,10 +65,19 @@ def ip_da_rede():
 
 
 def porta_em_uso():
-    """True se já há algo respondendo na porta (ex.: o sistema já aberto)."""
+    """True se já há algum programa usando a porta."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", PORTA)) == 0
+
+
+def e_o_sistema_de_ponto():
+    """True se quem responde na porta é este sistema (e não outro programa)."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORTA}/saude", timeout=2) as r:
+            return json.load(r).get("app") == APP_ID
+    except (OSError, ValueError):
+        return False
 
 
 def abrir_navegador_quando_pronto(url, espera_max=30):
@@ -60,7 +85,7 @@ def abrir_navegador_quando_pronto(url, espera_max=30):
     def tarefa():
         limite = time.monotonic() + espera_max
         while time.monotonic() < limite:
-            if porta_em_uso():
+            if e_o_sistema_de_ponto():
                 webbrowser.open(url)
                 return
             time.sleep(0.3)
@@ -71,9 +96,16 @@ def abrir_navegador_quando_pronto(url, espera_max=30):
 def main():
     url = f"http://localhost:{PORTA}"
     if porta_em_uso():
-        print("O sistema de ponto já está aberto em outra janela.")
-        print(f"Abrindo {url} no navegador...")
-        webbrowser.open(url)
+        if e_o_sistema_de_ponto():
+            print("O sistema de ponto já está aberto em outra janela.")
+            print(f"Abrindo {url} no navegador...")
+            webbrowser.open(url)
+            return
+        print(f"A porta {PORTA} já está sendo usada por outro programa.")
+        print("Feche o outro programa ou escolha outra porta: abra o arquivo")
+        print(f"  {CONFIG}")
+        print("no Bloco de Notas e acrescente uma linha como:  PORT = 8643")
+        input("Tecle Enter para sair.")
         return
     if not os.path.exists(CONFIG):
         configurar()

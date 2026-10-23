@@ -1,0 +1,34 @@
+{# Horários da semana. Espera `week_rows` (ver schedule.form_rows). #}
+<fieldset class="week">
+  <legend>Horário de trabalho</legend>
+  <div class="table-wrap">
+  <table class="week-table">
+    <thead><tr><th>Dia</th><th>Entrada</th><th>Saída intervalo</th><th>Retorno intervalo</th><th>Saída</th><th></th></tr></thead>
+    <tbody>
+    {% for label, i, v in week_rows %}
+      <tr data-day="{{ i }}">
+        <th>{{ label }}</th>
+        <td><input type="time" name="d{{ i }}_entrada" value="{{ v[0] }}"></td>
+        <td><input type="time" name="d{{ i }}_saida_intervalo" value="{{ v[1] }}"></td>
+        <td><input type="time" name="d{{ i }}_retorno_intervalo" value="{{ v[2] }}"></td>
+        <td><input type="time" name="d{{ i }}_saida" value="{{ v[3] }}"></td>
+        <td><button type="button" class="link" data-clear>folga</button></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint">Dia sem horários = folga. Sem intervalo: deixe "saída intervalo" e "retorno intervalo" vazios.
+    <button type="button" class="link" data-copy>Copiar horário de segunda para terça a sexta</button></p>
+</fieldset>
+<script>
+  document.querySelectorAll("fieldset.week").forEach(fs => {
+    fs.querySelectorAll("[data-clear]").forEach(b => b.addEventListener("click", () =>
+      b.closest("tr").querySelectorAll("input").forEach(i => i.value = "")));
+    fs.querySelector("[data-copy]").addEventListener("click", () => {
+      const src = [...fs.querySelectorAll('tr[data-day="0"] input')].map(i => i.value);
+      for (let d = 1; d <= 4; d++)
+        fs.querySelectorAll(`tr[data-day="${d}"] input`).forEach((i, k) => i.value = src[k]);
+    });
+  });
+</script>

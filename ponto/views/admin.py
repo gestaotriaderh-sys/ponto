@@ -28,14 +28,12 @@ from ..calc import (
     fmt_minutes,
     month_totals,
     period_summary,
-    parse_hours,
-    parse_schedule,
     parse_ts,
     punch_label,
-    schedule_for,
 )
 from ..clock import now
-from .. import theme
+from .. import records, theme
+from .. import schedule as sched
 from ..db import VALID_PUNCH, get_db, set_setting
 from ..holidays import national_holidays
 
@@ -77,28 +75,88 @@ def _valid_pin(pin):
     return pin.isdigit() and 4 <= len(pin) <= 8
 
 
-def _schedule_from_form():
-    """Lê os campos dia_0..dia_6 (horas). Retorna lista de minutos ou None."""
-    try:
-        return [parse_hours(request.form.get(f"dia_{i}")) for i in range(7)]
-    except ValueError:
-        flash("Horas inválidas na jornada. Use, por exemplo, 8, 8,5 ou 8:30.", "error")
+def _clean_cpf(text):
+    """Retorna o CPF só com dígitos, "" se vazio, ou None se inválido."""
+    digits = "".join(c for c in (text or "") if c.isdigit())
+    if not digits:
+        return ""
+    if len(digits) != 11 or digits == digits[0] * 11:
         return None
+    for size in (9, 10):
+        total = sum(int(d) * w for d, w in zip(digits[:size], range(size + 1, 1, -1)))
+        check = (total * 10) % 11 % 10
+        if check != int(digits[size]):
+            return None
+    return digits
 
 
-def _schedule_rows(schedule):
-    """Linhas (nome do dia, campo, valor) para o formulário de jornada."""
-    return [
-        (WEEKDAYS[i], f"dia_{i}", fmt_minutes(m) if m else "")
-        for i, m in enumerate(schedule)
-    ]
+def _form_date(name):
+    """Data de um campo do formulário; None se vazio; ValueError se inválida."""
+    value = request.form.get(name, "").strip()
+    return date.fromisoformat(value) if value else None
 
 
-DEFAULT_SCHEDULE = [480, 480, 480, 480, 480, 0, 0]
+def _personal_data_from_form(emp_id=None):
+    """Lê nome, CPF, nascimento e admissão. Retorna (dados, erro)."""
+    name = request.form.get("name", "").strip()
+    cpf = _clean_cpf(request.form.get("cpf"))
+    try:
+        birth = _form_date("birth_date")
+        admission = _form_date("admission_date")
+    except ValueError:
+        return None, "Data inválida."
+    if not name:
+        return None, "Informe o nome."
+    if cpf is None:
+        return None, "CPF inválido."
+    if admission is None:
+        return None, "Informe a data de admissão."
+    if birth and birth >= admission:
+        return None, "A data de nascimento deve ser anterior à admissão."
+    if cpf:
+        other = get_db().execute(
+            "SELECT name FROM employees WHERE cpf = ? AND id IS NOT ?", (cpf, emp_id)
+        ).fetchone()
+        if other:
+            return None, f"O CPF informado já está cadastrado para {other['name']}."
+    return {"name": name, "cpf": cpf or None, "birth": birth, "admission": admission}, None
 
 
-def _has_break_from_form():
-    return 1 if request.form.get("has_break") else 0
+def _week_from_form():
+    """Semana de horários do formulário, ou None (com mensagem) se inválida."""
+    week, errors = sched.parse_week(request.form.get)
+    for e in errors:
+        flash(e, "error")
+    return None if errors else week
+
+
+def _save_schedule(emp_id, start_day, week):
+    get_db().execute(
+        "INSERT OR REPLACE INTO schedules (employee_id, start_day, schedule, times, created_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (
+            emp_id,
+            start_day.isoformat(),
+            ",".join(map(str, sched.week_minutes(week))),
+            sched.to_json(week),
+            now().isoformat(),
+        ),
+    )
+    _sync_has_break(emp_id)
+
+
+def _sync_has_break(emp_id):
+    """Guarda se a jornada atual tem intervalo (usado quando o dia não tem horário)."""
+    _, week = records.week_on(emp_id, now().date())
+    if week:
+        get_db().execute(
+            "UPDATE employees SET has_break = ? WHERE id = ?",
+            (int(any(sched.has_break(t) for t in week)), emp_id),
+        )
+
+
+def _describe_history_week(minutes, times):
+    return sched.describe_week(times) if times else describe_schedule(minutes)
 
 
 @bp.route("/", methods=["GET", "POST"])
@@ -107,64 +165,50 @@ def employees():
     db = get_db()
     if request.method == "POST":
         code = request.form.get("code", "").strip()
-        name = request.form.get("name", "").strip()
         pin = request.form.get("pin", "")
-        schedule = _schedule_from_form()
-        if schedule is None:
+        data, error = _personal_data_from_form()
+        week = _week_from_form()
+        if error:
+            flash(error, "error")
+        elif week is None:
             pass
-        elif not code or not name:
-            flash("Informe matrícula e nome.", "error")
+        elif not code:
+            flash("Informe a matrícula.", "error")
         elif not _valid_pin(pin):
             flash("O PIN deve ter de 4 a 8 dígitos.", "error")
         elif db.execute("SELECT 1 FROM employees WHERE code = ?", (code,)).fetchone():
             flash(f"Já existe um funcionário com a matrícula {code}.", "error")
         else:
             cur = db.execute(
-                "INSERT INTO employees (code, name, pin_hash, schedule, has_break, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO employees (code, name, pin_hash, cpf, birth_date, admission_date,"
+                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     code,
-                    name,
+                    data["name"],
                     generate_password_hash(pin),
-                    ",".join(map(str, schedule)),
-                    _has_break_from_form(),
+                    data["cpf"],
+                    data["birth"] and data["birth"].isoformat(),
+                    data["admission"].isoformat(),
                     now().isoformat(),
                 ),
             )
-            _save_schedule(cur.lastrowid, now().date(), schedule)
+            _save_schedule(cur.lastrowid, data["admission"], week)
             db.commit()
-            flash(f"Funcionário {name} cadastrado.", "ok")
+            flash(f"Funcionário {data['name']} cadastrado.", "ok")
         return redirect(url_for("admin.employees"))
 
     rows = db.execute("SELECT * FROM employees ORDER BY active DESC, name").fetchall()
     today = now().date()
-    employees = [
-        dict(e, schedule_text=describe_schedule(schedule_for(_schedules(e["id"]), today) or [0] * 7))
-        for e in rows
-    ]
+    employees = []
+    for e in rows:
+        minutes, times = records.week_on(e["id"], today)
+        text = _describe_history_week(minutes, times) if minutes else "sem jornada"
+        employees.append(dict(e, schedule_text=text))
     return render_template(
         "admin/employees.html",
         employees=employees,
-        schedule_rows=_schedule_rows(DEFAULT_SCHEDULE),
-        has_break=True,
-    )
-
-
-def _schedules(emp_id):
-    """Histórico de jornadas do funcionário: [(data de início, jornada)]."""
-    return [
-        (date.fromisoformat(r["start_day"]), parse_schedule(r["schedule"]))
-        for r in get_db().execute(
-            "SELECT * FROM schedules WHERE employee_id = ? ORDER BY start_day", (emp_id,)
-        )
-    ]
-
-
-def _save_schedule(emp_id, start_day, schedule):
-    get_db().execute(
-        "INSERT OR REPLACE INTO schedules (employee_id, start_day, schedule, created_at)"
-        " VALUES (?, ?, ?, ?)",
-        (emp_id, start_day.isoformat(), ",".join(map(str, schedule)), now().isoformat()),
+        week_rows=sched.form_rows(sched.DEFAULT_WEEK),
+        today=today,
     )
 
 
@@ -175,74 +219,158 @@ def edit_employee(emp_id):
     if emp is None:
         return redirect(url_for("admin.employees"))
     today = now().date()
-    history = _schedules(emp_id)
 
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        schedule = _schedule_from_form()
-        try:
-            start_day = date.fromisoformat(request.form.get("start_day", ""))
-        except ValueError:
-            start_day = None
-        if not name:
-            flash("Informe o nome.", "error")
-        elif schedule is None:
-            pass
-        elif start_day is None:
-            flash("Informe a partir de quando vale a nova jornada.", "error")
-        elif start_day < today:
-            flash(
-                "A nova jornada não pode começar numa data passada; "
-                "os dias já registrados mantêm a jornada da época.",
-                "error",
-            )
+    if request.method == "POST":  # dados pessoais
+        data, error = _personal_data_from_form(emp_id)
+        if error:
+            flash(error, "error")
         else:
             db = get_db()
             db.execute(
-                "UPDATE employees SET name = ?, has_break = ? WHERE id = ?",
-                (name, _has_break_from_form(), emp_id),
+                "UPDATE employees SET name = ?, cpf = ?, birth_date = ?, admission_date = ?"
+                " WHERE id = ?",
+                (
+                    data["name"],
+                    data["cpf"],
+                    data["birth"] and data["birth"].isoformat(),
+                    data["admission"].isoformat(),
+                    emp_id,
+                ),
             )
-            if schedule != schedule_for(history, start_day):
-                _save_schedule(emp_id, start_day, schedule)
-                flash(
-                    f"Cadastro de {name} atualizado. A nova jornada vale a partir de "
-                    f"{start_day:%d/%m/%Y}.",
-                    "ok",
+            # Admissão anterior à primeira jornada: a primeira jornada passa a
+            # valer desde a admissão.
+            first = db.execute(
+                "SELECT MIN(start_day) AS d FROM schedules WHERE employee_id = ?", (emp_id,)
+            ).fetchone()["d"]
+            if first and data["admission"].isoformat() < first:
+                db.execute(
+                    "UPDATE schedules SET start_day = ? WHERE employee_id = ? AND start_day = ?",
+                    (data["admission"].isoformat(), emp_id, first),
                 )
-            else:
-                flash(f"Cadastro de {name} atualizado.", "ok")
             db.commit()
-            return redirect(url_for("admin.edit_employee", emp_id=emp_id))
+            flash(f"Dados de {data['name']} atualizados.", "ok")
         return redirect(url_for("admin.edit_employee", emp_id=emp_id))
 
-    current = schedule_for(history, today) or DEFAULT_SCHEDULE
+    history = records.schedule_history(emp_id)
+    _, current = records.week_on(emp_id, today)
+    if current is None and history:
+        current = history[-1][2]
+    overrides = get_db().execute(
+        "SELECT * FROM schedule_overrides WHERE employee_id = ? ORDER BY day DESC LIMIT 60",
+        (emp_id,),
+    ).fetchall()
+    in_force = max((s for s, _, _ in history if s <= today), default=None)
     return render_template(
         "admin/edit_employee.html",
         emp=emp,
         today=today,
-        schedule_rows=_schedule_rows(current),
-        has_break=emp["has_break"],
+        week_rows=sched.form_rows(current or sched.DEFAULT_WEEK),
+        current_known=bool(current),
         history=[
-            (start, describe_schedule(sched), start > today)
-            for start, sched in reversed(history)
+            (start, _describe_history_week(minutes, times), start > today, start == in_force,
+             i == 0)
+            for i, (start, minutes, times) in reversed(list(enumerate(history)))
         ],
+        overrides=[
+            (date.fromisoformat(o["day"]), sched.describe_day(sched.from_json(o["times"])), o["note"])
+            for o in overrides
+        ],
+        day_row=sched.form_rows([sched.DEFAULT_WEEK[0]])[0],
     )
+
+
+@bp.post("/funcionario/<int:emp_id>/jornada")
+@login_required
+def save_week(emp_id):
+    """Nova jornada semanal a partir de uma data (dias anteriores não mudam)."""
+    emp = _get_employee(emp_id)
+    if emp is None:
+        return redirect(url_for("admin.employees"))
+    week = _week_from_form()
+    try:
+        start_day = _form_date("start_day")
+    except ValueError:
+        start_day = None
+    admission = emp["admission_date"] and date.fromisoformat(emp["admission_date"])
+    if week is None:
+        pass
+    elif start_day is None:
+        flash("Informe a partir de quando vale a jornada.", "error")
+    elif admission and start_day < admission:
+        flash("A jornada não pode começar antes da admissão.", "error")
+    else:
+        _save_schedule(emp_id, start_day, week)
+        get_db().commit()
+        flash(f"Jornada salva. Vale a partir de {start_day:%d/%m/%Y}.", "ok")
+    return redirect(url_for("admin.edit_employee", emp_id=emp_id))
 
 
 @bp.post("/funcionario/<int:emp_id>/jornada/<start_day>/excluir")
 @login_required
 def delete_schedule(emp_id, start_day):
-    """Cancela uma mudança de jornada que ainda não entrou em vigor."""
+    """Remove uma jornada do histórico (exceto a primeira)."""
     db = get_db()
-    cur = db.execute(
-        "DELETE FROM schedules WHERE employee_id = ? AND start_day = ? AND start_day > ?",
-        (emp_id, start_day, now().date().isoformat()),
-    )
-    db.commit()
-    if cur.rowcount:
-        flash("Mudança de jornada cancelada.", "ok")
+    first = db.execute(
+        "SELECT MIN(start_day) AS d FROM schedules WHERE employee_id = ?", (emp_id,)
+    ).fetchone()["d"]
+    if start_day == first:
+        flash("A primeira jornada não pode ser removida; altere-a criando uma nova.", "error")
     else:
-        flash("Só é possível cancelar jornadas que ainda não começaram.", "error")
+        db.execute(
+            "DELETE FROM schedules WHERE employee_id = ? AND start_day = ?", (emp_id, start_day)
+        )
+        _sync_has_break(emp_id)
+        db.commit()
+        flash("Jornada removida do histórico.", "ok")
+    return redirect(url_for("admin.edit_employee", emp_id=emp_id))
+
+
+@bp.post("/funcionario/<int:emp_id>/horario-especial")
+@login_required
+def save_override(emp_id):
+    """Horário diferente num dia específico (ou folga naquele dia)."""
+    if _get_employee(emp_id) is None:
+        return redirect(url_for("admin.employees"))
+    note = request.form.get("note", "").strip()
+    try:
+        day = _form_date("day")
+    except ValueError:
+        day = None
+    times, error = (None, None)
+    if not request.form.get("folga"):
+        times, error = sched.parse_day(request.form.get, "o_")
+        if times is None and not error:
+            error = "informe os horários ou marque folga"
+    if day is None:
+        flash("Informe a data.", "error")
+    elif error:
+        flash(f"Horário especial: {error}.", "error")
+    elif not note:
+        flash("Informe o motivo do horário especial.", "error")
+    else:
+        get_db().execute(
+            "INSERT OR REPLACE INTO schedule_overrides (employee_id, day, times, note, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (emp_id, day.isoformat(), sched.to_json(times) if times else None, note,
+             now().isoformat()),
+        )
+        get_db().commit()
+        flash(f"Horário especial de {day:%d/%m/%Y} salvo.", "ok")
+    if request.form.get("voltar") == "dia" and day:
+        return redirect(url_for("admin.day", emp_id=emp_id, day=day.isoformat()))
+    return redirect(url_for("admin.edit_employee", emp_id=emp_id))
+
+
+@bp.post("/funcionario/<int:emp_id>/horario-especial/<day>/excluir")
+@login_required
+def delete_override(emp_id, day):
+    get_db().execute(
+        "DELETE FROM schedule_overrides WHERE employee_id = ? AND day = ?", (emp_id, day)
+    )
+    get_db().commit()
+    flash("Horário especial removido; o dia volta a seguir a jornada normal.", "ok")
+    if request.form.get("voltar") == "dia":
+        return redirect(url_for("admin.day", emp_id=emp_id, day=day))
     return redirect(url_for("admin.edit_employee", emp_id=emp_id))
 
 
@@ -304,9 +432,12 @@ def _load_period(emp, first, last):
         first,
         last,
         [parse_ts(r["ts"]) for r in rows],
-        _schedules(emp["id"]),
+        records.minutes_history(emp["id"]),
         holidays,
         now().date(),
+        overrides=records.overrides_between(emp["id"], first, last),
+        leaves=records.leaves_between(emp["id"], first, last),
+        admission=emp["admission_date"] and date.fromisoformat(emp["admission_date"]),
     )
     return rows, days
 
@@ -339,9 +470,8 @@ def report(emp_id):
         emp=emp,
         days=days,
         manual=manual,
-        schedule_text=describe_schedule(
-            schedule_for(_schedules(emp["id"]), now().date()) or [0] * 7
-        ),
+        schedule_text=_describe_history_week(*records.week_on(emp["id"], now().date()))
+        if records.week_on(emp["id"], now().date())[0] else "sem jornada",
         month=f"{year:04d}-{month:02d}",
         totals=month_totals(days),
     )
@@ -371,6 +501,8 @@ def report_csv(emp_id):
                     x
                     for x in [
                         f"Feriado: {d.holiday}" if d.holiday else "",
+                        d.leave or "",
+                        "Horário especial" if d.special else "",
                         "Marcação faltando" if d.incomplete else "",
                     ]
                     if x
@@ -436,22 +568,28 @@ def day(emp_id, day):
         " WHERE p.employee_id = ? AND p.ts >= ? AND p.ts < ? ORDER BY p.ts, p.id",
         (emp_id, the_day.isoformat(), (the_day + timedelta(days=1)).isoformat()),
     ).fetchall()
+    times = records.times_on(emp_id, the_day)
+    with_break = sched.has_break(times) if times else bool(emp["has_break"])
     punches, n = [], 0
     for r in rows:
         label = None
         if r["void_reason"] is None:
-            label = punch_label(n, bool(emp["has_break"]))
+            label = punch_label(n, with_break)
             n += 1
         punches.append((r, parse_ts(r["ts"]), label))
     summary = _load_period(emp, the_day, the_day)[1][0]
+    override = records.override_on(emp_id, the_day)
     return render_template(
         "admin/day.html",
         emp=emp,
         day=the_day,
         punches=punches,
         summary=summary,
-        next_label=punch_label(n, bool(emp["has_break"])),
+        next_label=punch_label(n, with_break),
         weekday=WEEKDAYS[the_day.weekday()],
+        planned=sched.describe_day(times),
+        override=override,
+        day_row=sched.form_rows([times or sched.DEFAULT_WEEK[0]])[0],
     )
 
 
@@ -667,7 +805,8 @@ def summary_csv():
     w.writerow(
         [
             "Matrícula", "Nome", "Trabalhado", "Esperado", "Horas extras",
-            "Horas faltando", "Saldo", "Faltas (dias)", "Dias com marcação faltando",
+            "Horas faltando", "Saldo", "Faltas (dias)", "Atestado (dias)", "Férias (dias)",
+            "Dias com marcação faltando",
         ]
     )
     for emp, t in _summary_rows(first, last, all_selected, ids):
@@ -675,7 +814,7 @@ def summary_csv():
             [
                 emp["code"], emp["name"], fmt_minutes(t.worked), fmt_minutes(t.expected),
                 fmt_minutes(t.overtime), fmt_minutes(t.missing), fmt_minutes(t.balance),
-                t.absences, t.incomplete,
+                t.absences, t.sick_days, t.vacation_days, t.incomplete,
             ]
         )
     filename = f"relatorio_{first.isoformat()}_a_{last.isoformat()}.csv"

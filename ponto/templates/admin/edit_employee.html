@@ -1,41 +1,87 @@
 {% extends "base.html" %}
 {% block title %}Editar — {{ emp.name }}{% endblock %}
 {% block content %}
-<h1>Editar funcionário</h1>
+<h1>{{ emp.name }}</h1>
+<p class="hint">Matrícula {{ emp.code }} ·
+  <a href="{{ url_for('admin.report', emp_id=emp.id) }}">ver espelho de ponto</a></p>
+
 <section class="card">
-  <p class="hint">Matrícula {{ emp.code }}</p>
+  <h2>Dados pessoais</h2>
   <form method="post" class="grid">
-    <label>Nome <input name="name" value="{{ emp.name }}" required></label>
-    <label>Nova jornada vale a partir de
-      <input type="date" name="start_day" value="{{ today.isoformat() }}" min="{{ today.isoformat() }}" required>
-    </label>
-    {% include "admin/_schedule.html" %}
-    <button type="submit">Salvar</button>
+    {% include "admin/_personal.html" %}
+    <button type="submit">Salvar dados</button>
   </form>
-  <p class="hint">Os dias anteriores à data escolhida continuam calculados com a jornada que valia na época.</p>
 </section>
 
-<h2>Histórico de jornadas</h2>
-<table>
-  <thead><tr><th>A partir de</th><th>Jornada</th><th></th></tr></thead>
-  <tbody>
-  {% for start, text, future in history %}
-    <tr>
-      <td>{{ start.strftime('%d/%m/%Y') }}</td>
-      <td>{{ text }}</td>
-      <td>
-        {% if future %}
-          <span class="tag">programada</span>
-          <form method="post" class="inline"
+<section class="card">
+  <h2>Horário de trabalho</h2>
+  {% if not current_known %}
+    <p class="flash error">A jornada atual foi cadastrada na versão antiga (só em horas). Informe os horários abaixo e salve.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('admin.save_week', emp_id=emp.id) }}" class="grid" id="form-jornada">
+    <label>Este horário vale a partir de
+      <input type="date" name="start_day" value="{{ today.isoformat() }}" min="{{ emp.admission_date or '' }}" required>
+    </label>
+    {% include "admin/_week.html" %}
+    <button type="submit">Salvar horário</button>
+  </form>
+  <p class="hint">Os dias anteriores à data escolhida continuam calculados com o horário que valia na época.</p>
+
+  <h3>Histórico</h3>
+  <table>
+    <thead><tr><th>A partir de</th><th>Horário</th><th></th></tr></thead>
+    <tbody>
+    {% for start, text, future, in_force, is_first in history %}
+      <tr>
+        <td>{{ start.strftime('%d/%m/%Y') }}</td>
+        <td>{{ text }}</td>
+        <td>
+          {% if future %}<span class="tag">programado</span>{% elif in_force %}<span class="tag">em vigor</span>{% endif %}
+          {% if not is_first %}
+          <form method="post" class="inline" onsubmit="return confirm('Remover este horário do histórico? Os dias a partir de {{ start.strftime('%d/%m/%Y') }} voltam a usar o horário anterior.')"
                 action="{{ url_for('admin.delete_schedule', emp_id=emp.id, start_day=start.isoformat()) }}">
-            <button class="link">Cancelar</button>
+            <button class="link">Remover</button>
           </form>
-        {% elif loop.first or (loop.previtem and loop.previtem[2]) %}
-          <span class="tag">em vigor</span>
-        {% endif %}
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Horário especial em um dia</h2>
+  <p class="hint">Para um dia com horário diferente do normal (ex.: saída antecipada combinada) ou uma folga avulsa.
+    Vale só para a data escolhida.</p>
+  <form method="post" action="{{ url_for('admin.save_override', emp_id=emp.id) }}" class="grid">
+    <label>Data <input type="date" name="day" required></label>
+    <label>Motivo <input name="note" required placeholder="ex.: saída antecipada combinada"></label>
+    {% include "admin/_day_times.html" %}
+    <button type="submit">Salvar horário especial</button>
+  </form>
+  {% if overrides %}
+  <table>
+    <thead><tr><th>Data</th><th>Horário</th><th>Motivo</th><th></th></tr></thead>
+    <tbody>
+    {% for day, text, note in overrides %}
+      <tr>
+        <td><a href="{{ url_for('admin.day', emp_id=emp.id, day=day.isoformat()) }}">{{ day.strftime('%d/%m/%Y') }}</a></td>
+        <td>{{ text }}</td>
+        <td>{{ note }}</td>
+        <td><form method="post" class="inline" action="{{ url_for('admin.delete_override', emp_id=emp.id, day=day.isoformat()) }}">
+          <button class="link">Remover</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+<script>
+  document.getElementById("form-jornada").addEventListener("submit", e => {
+    const d = e.target.start_day.value;
+    if (d < "{{ today.isoformat() }}" && !confirm("A data escolhida é anterior a hoje. Os dias a partir dela serão recalculados com o novo horário. Continuar?"))
+      e.preventDefault();
+  });
+</script>
 {% endblock %}

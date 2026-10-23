@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS employees (
     daily_minutes INTEGER NOT NULL DEFAULT 480,  -- obsoleto, ver tabela schedules
     schedule TEXT NOT NULL DEFAULT '480,480,480,480,480,0,0',  -- obsoleto
     has_break INTEGER NOT NULL DEFAULT 1,  -- tem intervalo durante a jornada
+    cpf TEXT,                           -- só dígitos
+    birth_date TEXT,                    -- AAAA-MM-DD
+    admission_date TEXT,                -- AAAA-MM-DD
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -50,9 +53,37 @@ CREATE TABLE IF NOT EXISTS schedules (
     employee_id INTEGER NOT NULL REFERENCES employees(id),
     start_day TEXT NOT NULL,            -- AAAA-MM-DD
     schedule TEXT NOT NULL,
+    times TEXT,                         -- horários (JSON, ver schedule.py)
     created_at TEXT NOT NULL,
     PRIMARY KEY (employee_id, start_day)
 );
+
+-- Horário diferente num dia específico (ex.: saída mais cedo combinada).
+-- `times` nulo significa folga naquele dia.
+CREATE TABLE IF NOT EXISTS schedule_overrides (
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    day TEXT NOT NULL,                  -- AAAA-MM-DD
+    times TEXT,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (employee_id, day)
+);
+
+-- Afastamentos: férias e faltas justificadas por atestado. Os dias do
+-- período não têm jornada esperada.
+CREATE TABLE IF NOT EXISTS leaves (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    kind TEXT NOT NULL,                 -- 'ferias' ou 'atestado'
+    first_day TEXT NOT NULL,
+    last_day TEXT NOT NULL,
+    note TEXT,
+    file_name TEXT,                     -- nome original do anexo
+    stored_file TEXT,                   -- nome do arquivo em instance/anexos
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_leaves_emp ON leaves(employee_id, first_day);
 
 CREATE TABLE IF NOT EXISTS holidays (
     day TEXT PRIMARY KEY,               -- AAAA-MM-DD
@@ -112,6 +143,11 @@ def init_db():
         " SELECT id, substr(created_at, 1, 10), schedule, created_at FROM employees"
         " WHERE id NOT IN (SELECT employee_id FROM schedules)"
     )
+    # Admissão de funcionários antigos: a data de início da primeira jornada.
+    db.execute(
+        "UPDATE employees SET admission_date = (SELECT MIN(start_day) FROM schedules"
+        " WHERE employee_id = employees.id) WHERE admission_date IS NULL"
+    )
     db.commit()
 
 
@@ -132,6 +168,14 @@ def _migrate(db):
         db.commit()
     if cols and "has_break" not in cols:
         db.execute("ALTER TABLE employees ADD COLUMN has_break INTEGER NOT NULL DEFAULT 1")
+        db.commit()
+    for col in ("cpf", "birth_date", "admission_date"):
+        if cols and col not in cols:
+            db.execute(f"ALTER TABLE employees ADD COLUMN {col} TEXT")
+            db.commit()
+    sched_cols = [r["name"] for r in db.execute("PRAGMA table_info(schedules)")]
+    if sched_cols and "times" not in sched_cols:
+        db.execute("ALTER TABLE schedules ADD COLUMN times TEXT")
         db.commit()
 
 

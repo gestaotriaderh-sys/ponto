@@ -4,10 +4,11 @@
 <p><a href="{{ url_for('admin.report', emp_id=emp.id, mes=day.strftime('%Y-%m')) }}">← Voltar ao espelho de ponto</a></p>
 <h1>{{ emp.name }} — {{ weekday }}, {{ day.strftime('%d/%m/%Y') }}</h1>
 <p class="hint">
-  {{ 'Com intervalo' if emp.has_break else 'Sem intervalo' }} ·
+  Horário previsto: <strong>{{ planned }}</strong>{% if override %} <span class="tag">horário especial: {{ override.note }}</span>{% endif %} ·
   Trabalhado {{ summary.worked_minutes | hhmm }} · Esperado {{ summary.expected_minutes | hhmm }} ·
   Saldo {{ summary.balance_minutes | hhmm }}
   {% if summary.holiday %}· <span class="tag">Feriado: {{ summary.holiday }}</span>{% endif %}
+  {% if summary.leave %}· <span class="tag">{{ summary.leave }}</span>{% endif %}
   {% if summary.incomplete %}· <span class="tag warn">marcação faltando</span>{% endif %}
 </p>
 
@@ -60,6 +61,23 @@
     <label>Justificativa <input name="note" required placeholder="ex.: esqueceu de marcar a saída"></label>
     <button type="submit">Incluir</button>
   </form>
+</section>
+<section class="card">
+  <h2>Horário deste dia</h2>
+  <p class="hint">Altere só se este dia teve um horário diferente do normal (ex.: saída antecipada combinada) ou foi folga.</p>
+  <form method="post" action="{{ url_for('admin.save_override', emp_id=emp.id) }}" class="grid">
+    <input type="hidden" name="day" value="{{ day.isoformat() }}">
+    <input type="hidden" name="voltar" value="dia">
+    <label>Motivo <input name="note" required value="{{ override.note if override else '' }}" placeholder="ex.: saída antecipada combinada"></label>
+    {% include "admin/_day_times.html" %}
+    <button type="submit">Salvar horário do dia</button>
+  </form>
+  {% if override %}
+  <form method="post" class="inline" action="{{ url_for('admin.delete_override', emp_id=emp.id, day=day.isoformat()) }}">
+    <input type="hidden" name="voltar" value="dia">
+    <button class="link">Voltar ao horário normal</button>
+  </form>
+  {% endif %}
 </section>
 <p class="hint">Marcações nunca são apagadas: as corrigidas ou desconsideradas ficam registradas acima, riscadas, com a justificativa.</p>
 <script>

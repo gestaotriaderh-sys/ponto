@@ -15,8 +15,14 @@ precisa de servidor de banco de dados.
   (triggers no SQLite). Correções entram como novas marcações manuais, com
   justificativa obrigatória, e aparecem destacadas no espelho.
 - **Administração** (protegida por senha):
-  - cadastro de funcionários (matrícula, nome, PIN e horas de trabalho em
-    cada dia da semana, de segunda a domingo);
+  - cadastro de funcionários: matrícula, nome, CPF (validado), data de
+    nascimento, data de admissão, PIN e horário de trabalho de cada dia da
+    semana (entrada, saída e retorno do intervalo, saída);
+  - mudança de horário a partir de uma data escolhida (os dias anteriores
+    mantêm o horário da época) e horário especial para um dia específico
+    (ex.: saída antecipada combinada ou folga avulsa);
+  - atestados, com anexo em PDF ou imagem, e férias: os dias cobertos não
+    contam como falta nem como horas faltando;
   - cadastro de feriados, com inclusão automática dos feriados nacionais
     (e, opcionalmente, Carnaval e Corpus Christi);
   - ativar/desativar funcionário e trocar PIN;
@@ -26,9 +32,9 @@ precisa de servidor de banco de dados.
     funcionários escolhidos ou todos, com horas trabalhadas, esperadas,
     horas extras, horas faltando, saldo e faltas (com CSV);
   - espelho de ponto mensal com horas trabalhadas, esperadas e saldo por dia;
-  - indicação, por funcionário, se a jornada tem intervalo (4 marcações:
-    entrada, saída intervalo, retorno intervalo e saída) ou não (entrada e
-    saída);
+  - sequência de marcações conforme o horário do dia: com intervalo,
+    entrada, saída intervalo, retorno intervalo e saída; sem intervalo,
+    entrada e saída;
   - tela de cada dia (clique na data no espelho de ponto) para corrigir o
     horário de uma marcação, desconsiderar uma marcação errada ou incluir
     uma esquecida, sempre com justificativa. A marcação original nunca é
@@ -47,7 +53,7 @@ precisa de servidor de banco de dados.
 
 Na primeira vez o programa instala o que precisa e pede a senha da área
 administrativa. Em seguida a tela do sistema abre sozinha no navegador
-padrão (`http://localhost:5000`). Deixe a janela preta aberta enquanto o
+padrão (`http://localhost:8642`). Deixe a janela preta aberta enquanto o
 sistema estiver em uso. Se o programa já estiver aberto, clicar de novo em
 `iniciar.bat` só abre o navegador, sem iniciar uma segunda cópia.
 
@@ -59,8 +65,12 @@ Opcionalmente, o fuso horário pode ser alterado pela variável de ambiente
 
 O banco fica em `instance/ponto.sqlite3`. Faça backup desse arquivo.
 
+A porta padrão é a 8642. Para usar outra, acrescente `PORT = 8643` (por
+exemplo) ao arquivo `instance/config.py`. Os anexos dos atestados ficam em
+`instance/anexos`.
+
 Para produção, use um servidor WSGI (ex.: `pip install waitress` e
-`waitress-serve --port 5000 app:app`) atrás de HTTPS.
+`waitress-serve --port 8642 app:app`) atrás de HTTPS.
 
 ## Cores e logotipo
 
@@ -79,9 +89,12 @@ pytest
 
 - As marcações do dia são pareadas em ordem: (entrada, saída), (entrada, saída)...
 - Número ímpar de marcações → dia sinalizado como "marcação faltando".
-- A jornada esperada de cada dia vem da escala semanal que estava em vigor
-  naquele dia (dias sem horas são folga). Dias anteriores ao cadastro do
-  funcionário e dias futuros não contam.
+- A jornada esperada de cada dia é calculada pelo horário em vigor naquele
+  dia (saída menos entrada, descontando o intervalo); dias sem horário são
+  folga. Um horário especial cadastrado para o dia tem prioridade. Dias
+  anteriores à admissão e dias futuros não contam.
+- Férias e atestados zeram a jornada esperada dos dias cobertos.
+- Horários que passam da meia-noite (turno noturno) ainda não são aceitos.
 - Em feriados a jornada esperada é zero; horas trabalhadas no feriado
   entram como saldo positivo.
 - Mudanças de jornada só valem da data escolhida em diante (hoje ou uma

@@ -2,15 +2,16 @@
 {% block title %}Funcionários{% endblock %}
 {% block content %}
 <h1>Funcionários</h1>
+<div class="table-wrap">
 <table>
-  <thead><tr><th>Matrícula</th><th>Nome</th><th>Jornada semanal</th><th>Intervalo</th><th>Situação</th><th></th></tr></thead>
+  <thead><tr><th>Matrícula</th><th>Nome</th><th>Admissão</th><th>Horário atual</th><th>Situação</th><th></th></tr></thead>
   <tbody>
   {% for e in employees %}
     <tr class="{{ '' if e.active else 'inactive' }}">
       <td>{{ e.code }}</td>
-      <td>{{ e.name }}</td>
+      <td>{{ e.name }}{% if e.cpf %}<br><span class="hint">CPF {{ e.cpf | cpf }}</span>{% endif %}</td>
+      <td>{{ e.admission_date | br_date }}</td>
       <td>{{ e.schedule_text }}</td>
-      <td>{{ 'Sim' if e.has_break else 'Não' }}</td>
       <td>{{ 'Ativo' if e.active else 'Inativo' }}</td>
       <td class="actions">
         <a href="{{ url_for('admin.report', emp_id=e.id) }}">Espelho de ponto</a>
@@ -29,14 +30,16 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
 
 <section class="card">
   <h2>Novo funcionário</h2>
   <form method="post" class="grid">
     <label>Matrícula <input name="code" required></label>
-    <label>Nome <input name="name" required></label>
+    {% set emp = none %}
+    {% include "admin/_personal.html" %}
     <label>PIN (4 a 8 dígitos) <input name="pin" inputmode="numeric" required></label>
-    {% include "admin/_schedule.html" %}
+    {% include "admin/_week.html" %}
     <button type="submit">Cadastrar</button>
   </form>
 </section>

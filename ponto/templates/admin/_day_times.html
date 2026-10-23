@@ -1,0 +1,9 @@
+{# Horários de um único dia (horário especial). Espera `day_row`. #}
+{% set v = day_row[2] %}
+<div class="day-times">
+  <label>Entrada <input type="time" name="o_entrada" value="{{ v[0] }}"></label>
+  <label>Saída intervalo <input type="time" name="o_saida_intervalo" value="{{ v[1] }}"></label>
+  <label>Retorno intervalo <input type="time" name="o_retorno_intervalo" value="{{ v[2] }}"></label>
+  <label>Saída <input type="time" name="o_saida" value="{{ v[3] }}"></label>
+</div>
+<label class="check"><input type="checkbox" name="folga" value="1"> Folga neste dia (sem jornada)</label>
